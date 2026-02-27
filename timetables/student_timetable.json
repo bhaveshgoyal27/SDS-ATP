@@ -1,0 +1,453 @@
+{
+  "students": [
+    {
+      "student_id": "57740",
+      "Timings": [
+        {
+          "Day": "Monday",
+          "Slots": [
+            {
+              "start_time": "08:40",
+              "end_time": "09:55"
+            },
+            {
+              "start_time": "13:25",
+              "end_time": "14:40"
+            }
+          ]
+        },
+        {
+          "Day": "Tuesday",
+          "Slots": [
+            {
+              "start_time": "11:40",
+              "end_time": "12:55"
+            }
+          ]
+        },
+        {
+          "Day": "Wednesday",
+          "Slots": [
+            {
+              "start_time": "08:40",
+              "end_time": "09:55"
+            },
+            {
+              "start_time": "13:25",
+              "end_time": "14:40"
+            }
+          ]
+        },
+        {
+          "Day": "Thursday",
+          "Slots": [
+            {
+              "start_time": "11:40",
+              "end_time": "12:55"
+            }
+          ]
+        },
+        {
+          "Day": "Friday",
+          "Slots": [
+            {
+              "start_time": "13:25",
+              "end_time": "14:40"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "student_id": "57741",
+      "Timings": [
+        {
+          "Day": "Monday",
+          "Slots": [
+            {
+              "start_time": "13:25",
+              "end_time": "14:40"
+            }
+          ]
+        },
+        {
+          "Day": "Tuesday",
+          "Slots": [
+            {
+              "start_time": "11:40",
+              "end_time": "12:55"
+            },
+            {
+              "start_time": "13:25",
+              "end_time": "14:40"
+            }
+          ]
+        },
+        {
+          "Day": "Wednesday",
+          "Slots": [
+            {
+              "start_time": "13:25",
+              "end_time": "14:40"
+            }
+          ]
+        },
+        {
+          "Day": "Thursday",
+          "Slots": [
+            {
+              "start_time": "11:40",
+              "end_time": "12:55"
+            },
+            {
+              "start_time": "13:25",
+              "end_time": "14:40"
+            }
+          ]
+        },
+        {
+          "Day": "Friday",
+          "Slots": []
+        }
+      ]
+    },
+    {
+      "student_id": "57742",
+      "Timings": [
+        {
+          "Day": "Monday",
+          "Slots": [
+            {
+              "start_time": "13:25",
+              "end_time": "14:40"
+            }
+          ]
+        },
+        {
+          "Day": "Tuesday",
+          "Slots": [
+            {
+              "start_time": "13:25",
+              "end_time": "14:40"
+            }
+          ]
+        },
+        {
+          "Day": "Wednesday",
+          "Slots": [
+            {
+              "start_time": "13:25",
+              "end_time": "14:40"
+            }
+          ]
+        },
+        {
+          "Day": "Thursday",
+          "Slots": [
+            {
+              "start_time": "13:25",
+              "end_time": "14:40"
+            },
+            {
+              "start_time": "17:00",
+              "end_time": "16:30"
+            }
+          ]
+        },
+        {
+          "Day": "Friday",
+          "Slots": [
+            {
+              "start_time": "13:25",
+              "end_time": "14:40"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "student_id": "57743",
+      "Timings": [
+        {
+          "Day": "Monday",
+          "Slots": [
+            {
+              "start_time": "08:40",
+              "end_time": "09:55"
+            },
+            {
+              "start_time": "13:25",
+              "end_time": "14:40"
+            }
+          ]
+        },
+        {
+          "Day": "Tuesday",
+          "Slots": [
+            {
+              "start_time": "13:25",
+              "end_time": "14:40"
+            }
+          ]
+        },
+        {
+          "Day": "Wednesday",
+          "Slots": [
+            {
+              "start_time": "08:40",
+              "end_time": "09:55"
+            },
+            {
+              "start_time": "13:25",
+              "end_time": "14:40"
+            }
+          ]
+        },
+        {
+          "Day": "Thursday",
+          "Slots": [
+            {
+              "start_time": "13:25",
+              "end_time": "14:40"
+            }
+          ]
+        },
+        {
+          "Day": "Friday",
+          "Slots": [
+            {
+              "start_time": "13:25",
+              "end_time": "14:40"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "student_id": "57744",
+      "Timings": [
+        {
+          "Day": "Monday",
+          "Slots": [
+            {
+              "start_time": "08:40",
+              "end_time": "09:55"
+            }
+          ]
+        },
+        {
+          "Day": "Wednesday",
+          "Slots": [
+            {
+              "start_time": "08:40",
+              "end_time": "09:55"
+            }
+          ]
+        },
+        {
+          "Day": "Friday",
+          "Slots": [
+            {
+              "start_time": "08:40",
+              "end_time": "09:55"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "student_id": "57745",
+      "Timings": [
+        {
+          "Day": "Tuesday",
+          "Slots": [
+            {
+              "start_time": "11:40",
+              "end_time": "12:55"
+            }
+          ]
+        },
+        {
+          "Day": "Thursday",
+          "Slots": [
+            {
+              "start_time": "13:25",
+              "end_time": "14:40"
+            },
+            {
+              "start_time": "17:00",
+              "end_time": "16:30"
+            }
+          ]
+        },
+        {
+          "Day": "Friday",
+          "Slots": [
+            {
+              "start_time": "08:40",
+              "end_time": "09:55"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "student_id": "57746",
+      "Timings": [
+        {
+          "Day": "Monday",
+          "Slots": [
+            {
+              "start_time": "08:40",
+              "end_time": "09:55"
+            }
+          ]
+        },
+        {
+          "Day": "Wednesday",
+          "Slots": [
+            {
+              "start_time": "08:40",
+              "end_time": "09:55"
+            }
+          ]
+        },
+        {
+          "Day": "Friday",
+          "Slots": []
+        }
+      ]
+    },
+    {
+      "student_id": "57747",
+      "Timings": [
+        {
+          "Day": "Monday",
+          "Slots": [
+            {
+              "start_time": "08:40",
+              "end_time": "09:55"
+            }
+          ]
+        },
+        {
+          "Day": "Tuesday",
+          "Slots": [
+            {
+              "start_time": "11:40",
+              "end_time": "12:55"
+            }
+          ]
+        },
+        {
+          "Day": "Wednesday",
+          "Slots": [
+            {
+              "start_time": "08:40",
+              "end_time": "09:55"
+            }
+          ]
+        },
+        {
+          "Day": "Thursday",
+          "Slots": [
+            {
+              "start_time": "11:40",
+              "end_time": "12:55"
+            }
+          ]
+        },
+        {
+          "Day": "Friday",
+          "Slots": []
+        }
+      ]
+    },
+    {
+      "student_id": "57748",
+      "Timings": [
+        {
+          "Day": "Monday",
+          "Slots": [
+            {
+              "start_time": "13:25",
+              "end_time": "14:40"
+            }
+          ]
+        },
+        {
+          "Day": "Wednesday",
+          "Slots": [
+            {
+              "start_time": "13:25",
+              "end_time": "14:40"
+            }
+          ]
+        },
+        {
+          "Day": "Friday",
+          "Slots": [
+            {
+              "start_time": "13:25",
+              "end_time": "14:40"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "student_id": "57749",
+      "Timings": [
+        {
+          "Day": "Monday",
+          "Slots": [
+            {
+              "start_time": "08:40",
+              "end_time": "09:55"
+            }
+          ]
+        },
+        {
+          "Day": "Tuesday",
+          "Slots": [
+            {
+              "start_time": "13:25",
+              "end_time": "14:40"
+            }
+          ]
+        },
+        {
+          "Day": "Wednesday",
+          "Slots": [
+            {
+              "start_time": "08:40",
+              "end_time": "09:55"
+            }
+          ]
+        },
+        {
+          "Day": "Thursday",
+          "Slots": [
+            {
+              "start_time": "13:25",
+              "end_time": "14:40"
+            },
+            {
+              "start_time": "17:00",
+              "end_time": "16:30"
+            }
+          ]
+        },
+        {
+          "Day": "Friday",
+          "Slots": [
+            {
+              "start_time": "08:40",
+              "end_time": "09:55"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
