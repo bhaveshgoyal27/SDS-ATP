@@ -4,6 +4,7 @@ import pandas as pd
 from utils.access_google_sheets import get_sheet_as_df, update_sheet_with_df, update_sheet_with_df_with_columns
 from utils.find_slots import resolve_time
 from utils.get_groups import assign_groups
+# import utils.gorubi_solver as gorubi_solver
 
 class Prelims:
     def __init__(self):
@@ -16,8 +17,18 @@ class Prelims:
         st_timetables = self.get_timetables()
         self.get_time_slots(course_pref, exams_df, st_timetables)
         groups_df = self.groupping()
-        # rooms_df = self.get_rooms()
-        # alloted_df = self.allot_rooms(rooms_df, time_resolved_df)
+        rooms_df = self.get_available_rooms()
+
+        group_records = groups_df.groupby("group_id").agg(
+            Group_size = ("Exam_ID",    "count"),
+            Date       = ("Date",       "first"),
+            Time_Start = ("Time_Start", "first"),
+            Time_End   = ("Time_End",   "max"),
+            Tags       = ("Tags",       lambda x: "|".join(x.dropna().unique())),
+        ).reset_index()
+
+        # alloted_df = gorubi_solver.assign_rooms(group_records, rooms_df)
+        # self.assign_rooms(groups_df, alloted_df)
         pass
 
     def process_course_list(self):
@@ -82,4 +93,37 @@ class Prelims:
         internal_df = internal_df[internal_df["Internal Status"] == "Slot booked"]
         groups_df = assign_groups(internal_df)
         groups_df.to_csv("groups.csv", index=False)
+        return groups_df
+
+    def get_available_rooms(self):
+        availability_df = get_sheet_as_df("SP26 Output", "Room Availability")
+        liv25_df = get_sheet_as_df("SP26 Output", "LIV25")
+        rooms_df = availability_df.merge(liv25_df[["Location Name", "Max Capacity"]], on="Location Name", how="left")
+        return rooms_df
+
+    def assign_rooms(self, groups_df, alloted_df):
+        output_df = get_sheet_as_df("SP26 Output", "SP26 Prelim")
+
+        exam_room = {}
+
+        for group_id, group_alloc in alloted_df.groupby("group_id"):
+            exam_ids = groups_df.loc[groups_df["group_id"] == group_id, "Exam_ID"].tolist()
+
+            if len(group_alloc) == 1:
+                room = group_alloc.iloc[0]["Location Name"]
+                for eid in exam_ids:
+                    exam_room[eid] = room
+            else:
+                slots = group_alloc.sort_values("students_count", ascending=False).reset_index(drop=True)
+                idx = 0
+                for _, slot in slots.iterrows():
+                    count = int(slot["students_count"])
+                    for eid in exam_ids[idx:idx + count]:
+                        exam_room[eid] = slot["Location Name"]
+                    idx += count
+
+        output_df["Room No"] = output_df["Exam_ID"].map(exam_room).fillna(output_df["Room No"])
+        output_df.loc[output_df["Exam_ID"].isin(exam_room), "Internal Status"] = "Room allocated"
+
+        update_sheet_with_df_with_columns("SP26 Output", "SP26 Prelim", output_df, "Exam_ID")
 
