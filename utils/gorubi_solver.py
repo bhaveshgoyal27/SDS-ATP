@@ -9,7 +9,7 @@ def assign_rooms(groups_df, rooms_df):
     Assigns exam groups to room slots.
 
     groups_df columns: group_id, Group_size, Date, Time_Start, Time_End, Tags
-    rooms_df  columns: slot_id, Location Name, Date, Time_Start, Time_End, Max Capacity
+    rooms_df  columns: slot_id, Location Name, Date, Time_Start, Time_End, Max_Cap
 
     Rules:
     - A slot can host multiple groups as long as their exam times don't overlap.
@@ -17,7 +17,7 @@ def assign_rooms(groups_df, rooms_df):
     - Prefer matching larger groups to larger rooms.
 
     Returns a DataFrame: group_id, slot_id, Location Name,
-                         students_count, Max Capacity, cap_50pct
+                         students_count, Max_Cap, cap_50pct
     """
     
     groups = groups_df.to_dict(orient="records")
@@ -29,7 +29,7 @@ def assign_rooms(groups_df, rooms_df):
     rdata = {r["slot_id"]:  r for r in rooms}
 
     # 50% capacity limit per slot
-    cap = {r["slot_id"]: math.floor(r["Max Capacity"] * 0.5) for r in rooms}
+    cap = {r["slot_id"]: math.floor(r["Max_Cap"] * 0.5) for r in rooms}
 
     def slot_covers_group(room, group):
         """Slot's date+time window fully covers the group's exam window."""
@@ -94,11 +94,11 @@ def assign_rooms(groups_df, rooms_df):
     # Secondary: prefer large groups in large rooms (tiebreaker)
     slots_used = gp.quicksum(r2g[g, r] for g in G for r in R)
     size_match = gp.quicksum(
-        g2r[g, r] * rdata[r]["Max Capacity"]
+        g2r[g, r] * rdata[r]["Max_Cap"]
         for g in G for r in R
     )
     max_size = max(g["Group_size"] for g in groups)
-    max_cap  = max(r["Max Capacity"] for r in rooms)
+    max_cap  = max(r["Max_Cap"] for r in rooms)
 
     m.setObjective(
         slots_used - (0.01 / (max_size * max_cap)) * size_match,
@@ -129,7 +129,7 @@ def assign_rooms(groups_df, rooms_df):
                     "slot_id":           r,
                     "Location Name":     rdata[r]["Location Name"],
                     "students_count": int(round(g2r[g, r].X)),
-                    "Max Capacity":      rdata[r]["Max Capacity"],
+                    "Max_Cap":      rdata[r]["Max_Cap"],
                     "cap_50pct":         cap[r],
                 })
 

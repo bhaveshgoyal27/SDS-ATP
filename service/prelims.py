@@ -4,7 +4,7 @@ import pandas as pd
 from utils.access_google_sheets import get_sheet_as_df, update_sheet_with_df, update_sheet_with_df_with_columns
 from utils.find_slots import resolve_time
 from utils.get_groups import assign_groups
-# import utils.gorubi_solver as gorubi_solver
+import utils.gorubi_solver as gorubi_solver
 
 class Prelims:
     def __init__(self):
@@ -27,8 +27,8 @@ class Prelims:
             Tags       = ("Tags",       lambda x: "|".join(x.dropna().unique())),
         ).reset_index()
 
-        # alloted_df = gorubi_solver.assign_rooms(group_records, rooms_df)
-        # self.assign_rooms(groups_df, alloted_df)
+        alloted_df = gorubi_solver.assign_rooms(group_records, rooms_df)
+        self.assign_rooms(groups_df, alloted_df)
         pass
 
     def process_course_list(self):
@@ -96,9 +96,9 @@ class Prelims:
         return groups_df
 
     def get_available_rooms(self):
-        availability_df = get_sheet_as_df("SP26 Output", "Room Availability")
-        liv25_df = get_sheet_as_df("SP26 Output", "LIV25")
-        rooms_df = availability_df.merge(liv25_df[["Location Name", "Max Capacity"]], on="Location Name", how="left")
+        availability_df = get_sheet_as_df("SP26 Input", "Room Availability")
+        liv25_df = get_sheet_as_df("SP26 Input", "LIV25")
+        rooms_df = availability_df.merge(liv25_df[["Location_Name", "Max_Cap"]], on="Location_Name", how="left")
         return rooms_df
 
     def assign_rooms(self, groups_df, alloted_df):
