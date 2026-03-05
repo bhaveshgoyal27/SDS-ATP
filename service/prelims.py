@@ -98,7 +98,9 @@ class Prelims:
     def get_available_rooms(self):
         availability_df = get_sheet_as_df("SP26 Input", "Room Availability")
         liv25_df = get_sheet_as_df("SP26 Input", "LIV25")
-        rooms_df = availability_df.merge(liv25_df[["Location_Name", "Max_Cap"]], on="Location_Name", how="left")
+        liv25_df = liv25_df[(liv25_df["S25"] == "Y") & (liv25_df["AIM"] == "Y")]
+        rooms_df = availability_df.merge(liv25_df[["Location_Name", "Max_Cap", "Zone"]], on="Location_Name", how="inner")
+        rooms_df.to_csv("rooms.csv", index=False)
         return rooms_df
 
     def assign_rooms(self, groups_df, alloted_df):
@@ -110,7 +112,7 @@ class Prelims:
             exam_ids = groups_df.loc[groups_df["group_id"] == group_id, "Exam_ID"].tolist()
 
             if len(group_alloc) == 1:
-                room = group_alloc.iloc[0]["Location Name"]
+                room = group_alloc.iloc[0]["Location_Name"]
                 for eid in exam_ids:
                     exam_room[eid] = room
             else:
@@ -119,7 +121,7 @@ class Prelims:
                 for _, slot in slots.iterrows():
                     count = int(slot["students_count"])
                     for eid in exam_ids[idx:idx + count]:
-                        exam_room[eid] = slot["Location Name"]
+                        exam_room[eid] = slot["Location_Name"]
                     idx += count
 
         output_df["Room No"] = output_df["Exam_ID"].map(exam_room).fillna(output_df["Room No"])

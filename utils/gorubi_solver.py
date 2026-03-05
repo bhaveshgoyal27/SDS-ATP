@@ -2,48 +2,66 @@ import gurobipy as gp
 from gurobipy import GRB
 import math
 import pandas as pd
-
+import time
 
 def assign_rooms(groups_df, rooms_df):
     """
     Assigns exam groups to room slots.
 
     groups_df columns: group_id, Group_size, Date, Time_Start, Time_End, Tags
-    rooms_df  columns: slot_id, Location Name, Date, Time_Start, Time_End, Max_Cap
+    rooms_df  columns: slot_id, Location_Name, Date, Time_Start, Time_End, Max_Cap
 
     Rules:
     - A slot can host multiple groups as long as their exam times don't overlap.
     - Each group's students in a slot must not exceed 50% of slot capacity.
+    - Prefer zone 1 rooms over zone 2 rooms.
     - Prefer matching larger groups to larger rooms.
 
-    Returns a DataFrame: group_id, slot_id, Location Name,
+    Returns a DataFrame: group_id, slot_id, Location_Name,
                          students_count, Max_Cap, cap_50pct
     """
-    
+
     groups = groups_df.to_dict(orient="records")
     rooms  = rooms_df.to_dict(orient="records")
 
-    G     = [g["group_id"] for g in groups]
-    R     = [r["slot_id"]  for r in rooms]
-    gdata = {g["group_id"]: g for g in groups}
-    rdata = {r["slot_id"]:  r for r in rooms}
+    # test data
+    # groups = [
+    #     {"group_id": "1", "Group_size": 10, "Date": "2026-03-04", "Time_Start": "09:00", "Time_End": "11:00", "Tags": "Tag1|Tag2"},
+    #     {"group_id": "2", "Group_size": 20, "Date": "2026-03-04", "Time_Start": "11:00", "Time_End": "13:00", "Tags": "Tag3|Tag4"},
+    #     {"group_id": "3", "Group_size": 30, "Date": "2026-03-04", "Time_Start": "13:00", "Time_End": "15:00", "Tags": "Tag5|Tag6"},
+    # ]
+    # rooms = [
+    #     {"slot_id": "1", "Location_Name": "Room1", "Date": "2026-03-04", "Time_Start": "09:00", "Time_End": "11:00", "Max_Cap": 100, "Zone": "1"},
+    #     {"slot_id": "2", "Location_Name": "Room2", "Date": "2026-03-04", "Time_Start": "11:00", "Time_End": "13:00", "Max_Cap": 200, "Zone": "1"},
+    #     {"slot_id": "3", "Location_Name": "Room3", "Date": "2026-03-04", "Time_Start": "13:00", "Time_End": "15:00", "Max_Cap": 300, "Zone": "1"},
+    #     {"slot_id": "4", "Location_Name": "Room4", "Date": "2026-03-04", "Time_Start": "15:00", "Time_End": "17:00", "Max_Cap": 400, "Zone": "1"},
+    #     {"slot_id": "5", "Location_Name": "Room5", "Date": "2026-03-04", "Time_Start": "17:00", "Time_End": "19:00", "Max_Cap": 500, "Zone": "2"},
+    # ]
+
+    G     = [g["group_id"] for g in groups] # list of group_ids
+    R     = [r["slot_id"]  for r in rooms] # list of slot_ids
+    gdata = {g["group_id"]: g for g in groups} # dict of group_id: group
+    rdata = {r["slot_id"]:  r for r in rooms} # dict of slot_id: room
 
     # 50% capacity limit per slot
     cap = {r["slot_id"]: math.floor(r["Max_Cap"] * 0.5) for r in rooms}
 
     def slot_covers_group(room, group):
         """Slot's date+time window fully covers the group's exam window."""
-        return room["Date"] == group["Date"] and int(room["Time_Start"]) <= int(group["Time_Start"]) and int(room["Time_End"]) >= int(group["Time_End"])
+        return room["Date"] == group["Date"] and room["Time_Start"] <= group["Time_Start"] and room["Time_End"] >= group["Time_End"]
 
     def exams_overlap(g1, g2):
         """True if two groups have overlapping exam times on the same date."""
-        return g1["Date"] == g2["Date"] and int(g1["Time_Start"]) < int(g2["Time_End"]) and int(g2["Time_Start"]) < int(g1["Time_End"])
+        return g1["Date"] == g2["Date"] and g1["Time_Start"] < g2["Time_End"] and g2["Time_Start"] < g1["Time_End"]
 
     # Compatible (group, slot) pairs
     compat = {
         (g, r): slot_covers_group(rdata[r], gdata[g])
         for g in G for r in R
     }
+    for g in G:
+        if not any(compat[g, r] for r in R):
+            print(f"Group {g} has NO compatible room slot — will be infeasible")
 
     # Pairs of groups whose exam times overlap
     conflict = {}
@@ -91,8 +109,14 @@ def assign_rooms(groups_df, rooms_df):
 
     # ── Objective ─────────────────────────────────────────────────────────────
     # Primary:   minimize total slot assignments (compact packing)
-    # Secondary: prefer large groups in large rooms (tiebreaker)
+    # Secondary: prefer Zone 1 over Zone 2
+    # Tertiary:  prefer large groups in large rooms (tiebreaker)
     slots_used = gp.quicksum(r2g[g, r] for g in G for r in R)
+    zone2_used = gp.quicksum(
+        r2g[g, r]
+        for g in G for r in R
+        if rdata[r].get("Zone") == 2
+    )
     size_match = gp.quicksum(
         g2r[g, r] * rdata[r]["Max_Cap"]
         for g in G for r in R
@@ -101,7 +125,7 @@ def assign_rooms(groups_df, rooms_df):
     max_cap  = max(r["Max_Cap"] for r in rooms)
 
     m.setObjective(
-        slots_used - (0.01 / (max_size * max_cap)) * size_match,
+        slots_used + 0.5 * zone2_used - (0.01 / (max_size * max_cap)) * size_match,
         GRB.MINIMIZE
     )
 
@@ -109,7 +133,11 @@ def assign_rooms(groups_df, rooms_df):
     m.Params.MIPGap    = 0.0
     m.Params.TimeLimit = 120
 
+    m.Params.DualReductions = 0  # forces Gurobi to distinguish INF vs UNBD
+    start_time = time.time()
     m.optimize()
+    end_time = time.time()
+    print(f"Time taken: {end_time - start_time} seconds")
 
     # ── Results ────────────────────────────────────────────────────────
     if m.status == GRB.INFEASIBLE:
@@ -127,10 +155,13 @@ def assign_rooms(groups_df, rooms_df):
                 results.append({
                     "group_id":          g,
                     "slot_id":           r,
-                    "Location Name":     rdata[r]["Location Name"],
+                    "Location_Name":     rdata[r]["Location_Name"],
                     "students_count": int(round(g2r[g, r].X)),
                     "Max_Cap":      rdata[r]["Max_Cap"],
                     "cap_50pct":         cap[r],
+                    "Zone":              rdata[r]["Zone"],
                 })
 
-    return pd.DataFrame(results)
+    results_df = pd.DataFrame(results)
+    results_df.to_csv("assigned_rooms.csv", index=False)
+    return results_df

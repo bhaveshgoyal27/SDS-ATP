@@ -5,3 +5,6 @@ __pycache__/
 .DS_Store
 result*.csv
 groups.csv
+rooms.csv
+assigned_rooms.csv
+infeasible.ilp
