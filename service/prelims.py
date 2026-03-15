@@ -3,7 +3,6 @@ import datetime
 import pandas as pd
 from utils.access_google_sheets import get_sheet_as_df, update_sheet_with_df, update_sheet_with_df_with_columns
 from utils.find_slots import resolve_time
-from utils.get_groups import assign_groups
 
 class Prelims:
     def __init__(self):
@@ -15,7 +14,6 @@ class Prelims:
         exams_df = self.get_valid_exams()
         st_timetables = self.get_timetables()
         self.get_time_slots(course_pref, exams_df, st_timetables)
-        groups_df = self.groupping()
         # rooms_df = self.get_rooms()
         # alloted_df = self.allot_rooms(rooms_df, time_resolved_df)
         pass
@@ -77,9 +75,4 @@ class Prelims:
         new_df.to_csv("result1.csv", index=False)
         update_sheet_with_df_with_columns("SP26 Output", "SP26 Prelim", new_df, "Exam_ID")
 
-    def groupping(self):
-        internal_df = get_sheet_as_df("SP26 Output", "SP26 Prelim")
-        internal_df = internal_df[internal_df["Internal Status"] == "Slot booked"]
-        groups_df = assign_groups(internal_df)
-        groups_df.to_csv("groups.csv", index=False)
 
