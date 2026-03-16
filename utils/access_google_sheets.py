@@ -15,11 +15,15 @@ def _get_client(creds_json_path="keys/atp-poc1-4e72f50119bc.json"):
 
 # ---- FUNCTION 1: Read entire sheet as pandas df ----
 def get_sheet_as_df(file_name, sheet_name):
-    client = _get_client()
-    sheet = client.open(file_name).worksheet(sheet_name)
-    data = sheet.get_all_records()  # returns list of dicts
-    df = pd.DataFrame(data)
-    return df
+    try:
+        client = _get_client()
+        sheet = client.open(file_name).worksheet(sheet_name)
+        data = sheet.get_all_records()  # returns list of dicts
+        df = pd.DataFrame(data)
+        return df
+    except Exception as e:
+        print(f"Error getting sheet as df: {e}")
+        return None
 
 
 # ---- FUNCTION 2: Update sheet using key columns ----

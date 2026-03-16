@@ -14,9 +14,9 @@ class Prelims:
         exams_df = self.get_valid_exams()
         st_timetables = self.get_timetables()
         self.get_time_slots(course_pref, exams_df, st_timetables)
-        # rooms_df = self.get_rooms()
-        # alloted_df = self.allot_rooms(rooms_df, time_resolved_df)
-        pass
+        rooms_df = self.get_rooms()
+        exams_df = self.get_exams_df()
+        self.allot_rooms(exams_df, rooms_df)
 
     def process_course_list(self):
         df = get_sheet_as_df("SP26 Input", "Courses Raw Form")
@@ -75,4 +75,27 @@ class Prelims:
         new_df.to_csv("result1.csv", index=False)
         update_sheet_with_df_with_columns("SP26 Output", "SP26 Prelim", new_df, "Exam_ID")
 
+    def get_rooms(self):
+        rooms_df = get_sheet_as_df("SP26 Input", "LIV25")
+        liv25 = get_sheet_as_df("SP26 Input", "Room Availability")
+        rooms_df = rooms_df[(rooms_df["S25"] == "Y") & (rooms_df["AIM"] == "Y")]
+        rooms_df = rooms_df[["Location_Name", "Testing capacity", "Zone"]]
+        liv25 = liv25.merge(rooms_df, on="Location_Name", how="left")
+        liv25.to_csv("rooms.csv", index=False)
+        return liv25
+
+    def get_exams_df(self):
+        exams_df = get_sheet_as_df("SP26 Output", "SP26 Prelim")
+        exams_df = exams_df.loc[exams_df['Internal Status'] == "Slot booked"]
+        exams_df.to_csv("exams.csv", index=False)
+        return exams_df
+
+    def allot_rooms(self, exams_df, rooms_df):
+        from utils.gurobi_solver import allot_rooms as solve_rooms
+        result_df = solve_rooms(exams_df, rooms_df)
+        result_df.to_csv("result.csv", index=False)
+        update_sheet_with_df_with_columns(
+            "SP26 Output", "SP26 Prelim", result_df, "Exam_ID"
+        )
+        return result_df
 
