@@ -3,8 +3,5 @@ keys/
 __pycache__/
 *.pyc
 .DS_Store
-result*.csv
-groups.csv
-rooms.csv
-assigned_rooms.csv
-infeasible.ilp
+*.csv
+*.ilp

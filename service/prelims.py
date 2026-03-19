@@ -3,7 +3,6 @@ import datetime
 import pandas as pd
 from utils.access_google_sheets import get_sheet_as_df, update_sheet_with_df, update_sheet_with_df_with_columns
 from utils.find_slots import resolve_time
-from utils.get_groups import assign_groups
 import utils.gorubi_solver as gorubi_solver
 
 class Prelims:
@@ -16,20 +15,10 @@ class Prelims:
         exams_df = self.get_valid_exams()
         st_timetables = self.get_timetables()
         self.get_time_slots(course_pref, exams_df, st_timetables)
-        groups_df = self.groupping()
+        
+        exams_time_df = self.get_exams_time_df()
         rooms_df = self.get_available_rooms()
-
-        group_records = groups_df.groupby("group_id").agg(
-            Group_size = ("Exam_ID",    "count"),
-            Date       = ("Date",       "first"),
-            Time_Start = ("Time_Start", "first"),
-            Time_End   = ("Time_End",   "max"),
-            Tags       = ("Tags",       lambda x: "|".join(x.dropna().unique())),
-        ).reset_index()
-
-        alloted_df = gorubi_solver.assign_rooms(group_records, rooms_df)
-        self.assign_rooms(groups_df, alloted_df)
-        pass
+        # gorubi_solver.assign_rooms(exams_time_df, rooms_df)
 
     def process_course_list(self):
         df = get_sheet_as_df("SP26 Input", "Courses Raw Form")
@@ -85,15 +74,13 @@ class Prelims:
 
     def get_time_slots(self, course_pref, exams_df, st_timetables):
         new_df = resolve_time(course_pref, exams_df, st_timetables)
-        new_df.to_csv("result1.csv", index=False)
         update_sheet_with_df_with_columns("SP26 Output", "SP26 Prelim", new_df, "Exam_ID")
 
-    def groupping(self):
-        internal_df = get_sheet_as_df("SP26 Output", "SP26 Prelim")
-        internal_df = internal_df[internal_df["Internal Status"] == "Slot booked"]
-        groups_df = assign_groups(internal_df)
-        groups_df.to_csv("groups.csv", index=False)
-        return groups_df
+    def get_exams_time_df(self):
+        exams_df = get_sheet_as_df("SP26 Output", "SP26 Prelim")
+        exams_df = exams_df.loc[exams_df['Internal Status'] == "Slot booked"]
+        exams_df.to_csv("exams.csv", index=False)
+        return exams_df
 
     def get_available_rooms(self):
         availability_df = get_sheet_as_df("SP26 Input", "Room Availability")
