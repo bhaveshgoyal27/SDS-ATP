@@ -4,6 +4,12 @@ from gurobipy import GRB
 from itertools import combinations
 
 
+def _hhmm_to_minutes(t):
+    """Convert an HHMM-format integer (e.g. 840 → 8h40m) to minutes since midnight."""
+    t = int(t)
+    return (t // 100) * 60 + (t % 100)
+
+
 def allot_rooms(exams_df, rooms_df):
     """
     Assign exam students to room slots using a Gurobi ILP.
@@ -17,10 +23,14 @@ def allot_rooms(exams_df, rooms_df):
       C5  Students with the PRIV or CODS tag are placed alone.
       C6  Overlapping time slots for the same physical room on the
           same date share a single capacity limit.
+      C7  The room must open at least 15 minutes before the exam
+          starts (hard minimum).  30-minute buffer is preferred and
+          optimised for via the objective.
 
     Objective hierarchy (descending priority):
-      P2  Maximise the number of exams assigned.
-      P1  Minimise the number of room slots used.
+      P3  Maximise the number of exams assigned.
+      P2  Minimise the number of room slots used.
+      P1  Prefer 30-minute pre-exam buffer over 15-minute.
       P0  Prefer Zone-1 rooms over Zone-2.
 
     Returns the exams DataFrame with 'Room No' and 'Internal Status'
@@ -58,25 +68,32 @@ def allot_rooms(exams_df, rooms_df):
     n_e, n_r = len(exams), len(rooms)
 
     # ------------------------------------------------------------------ #
-    #  Pre-compute compatibility  (exam i fits inside room slot j)       #
+    #  Pre-compute compatibility                                         #
+    #  Hard requirement: room opens >= 15 min before exam start.         #
+    #  Preferred:        room opens >= 30 min before exam start.         #
     # ------------------------------------------------------------------ #
     compat = set()
+    has_30_buffer = set()
     exam_to_rooms: dict[int, list[int]] = {i: [] for i in range(n_e)}
     room_to_exams: dict[int, list[int]] = {j: [] for j in range(n_r)}
 
     for i in range(n_e):
         e_date = exams.at[i, "Date"]
-        e_ts = exams.at[i, "Time_Start"]
-        e_te = exams.at[i, "Time_End"]
+        e_ts_min = _hhmm_to_minutes(exams.at[i, "Time_Start"])
+        e_te_min = _hhmm_to_minutes(exams.at[i, "Time_End"])
         for j in range(n_r):
+            r_ts_min = _hhmm_to_minutes(rooms.at[j, "Time_Start"])
+            r_te_min = _hhmm_to_minutes(rooms.at[j, "Time_End"])
             if (
                 e_date == rooms.at[j, "Date"]
-                and e_ts >= rooms.at[j, "Time_Start"]
-                and e_te <= rooms.at[j, "Time_End"]
+                and e_ts_min - 15 >= r_ts_min
+                and e_te_min <= r_te_min
             ):
                 compat.add((i, j))
                 exam_to_rooms[i].append(j)
                 room_to_exams[j].append(i)
+                if e_ts_min - 30 >= r_ts_min:
+                    has_30_buffer.add((i, j))
 
     courses = exams["Course_ID"].unique().tolist()
     course_exams = {
@@ -118,16 +135,21 @@ def allot_rooms(exams_df, rooms_df):
 
     model.setObjectiveN(
         -gp.quicksum(x[i, j] for (i, j) in compat),
-        index=0, priority=2, weight=1.0, name="max_assign",
+        index=0, priority=3, weight=1.0, name="max_assign",
     )
     model.setObjectiveN(
         gp.quicksum(y[j] for j in range(n_r)),
-        index=1, priority=1, weight=1.0, name="min_rooms",
+        index=1, priority=2, weight=1.0, name="min_rooms",
+    )
+    only_15 = compat - has_30_buffer
+    model.setObjectiveN(
+        gp.quicksum(x[i, j] for (i, j) in only_15),
+        index=2, priority=1, weight=1.0, name="prefer_30_buffer",
     )
     zone2_slots = {j for j in range(n_r) if rooms.at[j, "Zone"] != 1.0}
     model.setObjectiveN(
         gp.quicksum(x[i, j] for (i, j) in compat if j in zone2_slots),
-        index=2, priority=0, weight=1.0, name="prefer_zone1",
+        index=3, priority=0, weight=1.0, name="prefer_zone1",
     )
 
     # ------------------------------------------------------------------ #
