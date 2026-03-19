@@ -1,0 +1,7 @@
+.venv/
+keys/
+__pycache__/
+*.pyc
+.DS_Store
+*.csv
+*.ilp
