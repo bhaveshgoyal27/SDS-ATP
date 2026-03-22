@@ -28,9 +28,10 @@ def allot_rooms(exams_df, rooms_df):
           optimised for via the objective.
 
     Objective hierarchy (descending priority):
-      P3  Maximise the number of exams assigned.
-      P2  Minimise the number of room slots used.
-      P1  Prefer 30-minute pre-exam buffer over 15-minute.
+      P4  Maximise the number of exams assigned.
+      P3  Minimise the number of room slots used.
+      P2  Prefer 30-minute pre-exam buffer over 15-minute.
+      P1  Prefer rooms with >= 15-minute post-exam buffer.
       P0  Prefer Zone-1 rooms over Zone-2.
 
     Returns the exams DataFrame with 'Room No' and 'Internal Status'
@@ -74,6 +75,7 @@ def allot_rooms(exams_df, rooms_df):
     # ------------------------------------------------------------------ #
     compat = set()
     has_30_buffer = set()
+    has_15_post_buffer = set()
     exam_to_rooms: dict[int, list[int]] = {i: [] for i in range(n_e)}
     room_to_exams: dict[int, list[int]] = {j: [] for j in range(n_r)}
 
@@ -94,6 +96,8 @@ def allot_rooms(exams_df, rooms_df):
                 room_to_exams[j].append(i)
                 if e_ts_min - 30 >= r_ts_min:
                     has_30_buffer.add((i, j))
+                if r_te_min >= e_te_min + 15:
+                    has_15_post_buffer.add((i, j))
 
     courses = exams["Course_ID"].unique().tolist()
     course_exams = {
@@ -135,21 +139,26 @@ def allot_rooms(exams_df, rooms_df):
 
     model.setObjectiveN(
         -gp.quicksum(x[i, j] for (i, j) in compat),
-        index=0, priority=3, weight=1.0, name="max_assign",
+        index=0, priority=4, weight=1.0, name="max_assign",
     )
     model.setObjectiveN(
         gp.quicksum(y[j] for j in range(n_r)),
-        index=1, priority=2, weight=1.0, name="min_rooms",
+        index=1, priority=3, weight=1.0, name="min_rooms",
     )
     only_15 = compat - has_30_buffer
     model.setObjectiveN(
         gp.quicksum(x[i, j] for (i, j) in only_15),
-        index=2, priority=1, weight=1.0, name="prefer_30_buffer",
+        index=2, priority=2, weight=1.0, name="prefer_30_buffer",
+    )
+    no_post_buffer = compat - has_15_post_buffer
+    model.setObjectiveN(
+        gp.quicksum(x[i, j] for (i, j) in no_post_buffer),
+        index=3, priority=1, weight=1.0, name="prefer_15_post",
     )
     zone2_slots = {j for j in range(n_r) if rooms.at[j, "Zone"] != 1.0}
     model.setObjectiveN(
         gp.quicksum(x[i, j] for (i, j) in compat if j in zone2_slots),
-        index=3, priority=0, weight=1.0, name="prefer_zone1",
+        index=4, priority=0, weight=1.0, name="prefer_zone1",
     )
 
     # ------------------------------------------------------------------ #
