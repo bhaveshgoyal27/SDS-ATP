@@ -16,20 +16,27 @@ def allot_rooms(exams_df, rooms_df):
 
     Constraints enforced:
       C1  Each exam is assigned to at most one room slot.
-      C2  A room slot cannot exceed its testing capacity.
-      C3  At most 3 distinct Course_IDs per room slot.
-      C4  If any student in a room carries the RD tag, that room
-          may hold at most 20 students.
-      C5  Students with the PRIV or CODS tag are placed alone.
-      C6  Overlapping time slots for the same physical room on the
-          same date share a single capacity limit.
-      C7  The room must open at least 15 minutes before the exam
+      C2  A concurrent exam-group within a room slot cannot exceed
+          the room's testing capacity.
+      C3  At most 3 distinct Course_IDs per concurrent exam-group.
+      C4  If any student in a concurrent exam-group carries the RD
+          tag, that group may hold at most 20 students.
+      C5  Students with the PRIV or CODS tag are placed alone within
+          their concurrent exam-group; other non-overlapping groups
+          in the same room slot are unaffected.
+      C6  The room must open at least 15 minutes before the exam
           starts (hard minimum).  30-minute buffer is preferred and
           optimised for via the objective.
+      C7  Two exams assigned to the same room slot must not have
+          conflicting time windows: if their windows differ, there
+          must be at least 15 minutes between the two exams (hard minimum); 
+          30 minutes is preferred and optimised for via P2.
 
     Objective hierarchy (descending priority):
-      P4  Maximise the number of exams assigned.
-      P3  Minimise the number of room slots used.
+      P5  Maximise the number of exams assigned.
+      P4  Minimise the number of room slots used.
+      P3  Minimise the total number of (course, exam-group) pairings,
+          i.e. concentrate each course into as few exams+rooms as possible.
       P2  Prefer 30-minute pre-exam buffer over 15-minute.
       P1  Prefer rooms with >= 15-minute post-exam buffer.
       P0  Prefer Zone-1 rooms over Zone-2.
@@ -65,7 +72,6 @@ def allot_rooms(exams_df, rooms_df):
     )
     has_rd = tags_parsed.apply(lambda s: "RD" in s)
     needs_private = tags_parsed.apply(lambda s: bool(s & {"PRIV", "CODS"}))
-
     n_e, n_r = len(exams), len(rooms)
 
     # ------------------------------------------------------------------ #
@@ -101,10 +107,41 @@ def allot_rooms(exams_df, rooms_df):
 
     courses = exams["Course_ID"].unique().tolist()
     course_exams = {
-        c: exams.index[exams["Course_ID"] == c].tolist() for c in courses
+        c: set(exams.index[exams["Course_ID"] == c]) for c in courses
     }
     rd_indices = [i for i in range(n_e) if has_rd.iloc[i]]
     priv_indices = [i for i in range(n_e) if needs_private.iloc[i]]
+
+    # ------------------------------------------------------------------ #
+    #  Pre-compute inter-exam gaps within each room slot (for C8 / P2)   #
+    #  gap < 15  → hard conflict (C8 blocks both in same room slot)      #
+    #  15 ≤ gap < 30 → allowed but penalised (prefer 30-min gap, P2)    #
+    # ------------------------------------------------------------------ #
+    inter_15_blocked: set[tuple[int, int, int]] = set()  # (i1, i2, j)
+    inter_only_15: set[tuple[int, int, int]] = set()     # (i1, i2, j)
+
+    for j in range(n_r):
+        for i1, i2 in combinations(room_to_exams[j], 2):
+            ts1 = _hhmm_to_minutes(exams.at[i1, "Time_Start"])
+            te1 = _hhmm_to_minutes(exams.at[i1, "Time_End"])
+            ts2 = _hhmm_to_minutes(exams.at[i2, "Time_Start"])
+            te2 = _hhmm_to_minutes(exams.at[i2, "Time_End"])
+            if ts1 == ts2:
+                continue  # concurrent: no restriction
+            gap = max(ts2 - te1, ts1 - te2)
+            if gap < 15:
+                inter_15_blocked.add((i1, i2, j))
+            elif gap < 30:
+                inter_only_15.add((i1, i2, j))
+
+    # ------------------------------------------------------------------ #
+    #  Group exams in each room slot by exact time window               #
+    # ------------------------------------------------------------------ #
+    groups: dict[int, dict[int, list[int]]] = {j: {} for j in range(n_r)}
+    for j in range(n_r):
+        for i in room_to_exams[j]:
+            key = _hhmm_to_minutes(exams.at[i, "Time_Start"])
+            groups[j].setdefault(key, []).append(i)
 
     # ------------------------------------------------------------------ #
     #  Build Gurobi model                                                #
@@ -120,14 +157,25 @@ def allot_rooms(exams_df, rooms_df):
         j: model.addVar(vtype=GRB.BINARY, name=f"y_{j}")
         for j in range(n_r)
     }
-    z = {
-        (c, j): model.addVar(vtype=GRB.BINARY, name=f"z_{c}_{j}")
+    # z_g[c, j, ts] = 1 iff course c has ≥1 exam in room j starts at time ts
+    z_g = {
+        (c, j, ts): model.addVar(vtype=GRB.BINARY, name=f"zg_{c}_{j}_{ts}")
+        for j in range(n_r)
+        for ts in groups[j]
         for c in courses
-        for j in range(n_r)
+        if any(exams.at[i, "Course_ID"] == c for i in groups[j][ts])
     }
-    rd_flag = {
-        j: model.addVar(vtype=GRB.BINARY, name=f"rf_{j}")
+    # rd_flag_g[j, ts] = 1 iff the concurrent group (j, ts) contains an RD exam
+    rd_flag_g = {
+        (j, ts): model.addVar(vtype=GRB.BINARY, name=f"rfg_{j}_{ts}")
         for j in range(n_r)
+        for ts in groups[j]
+    }
+    # q[i1,i2,j] = 1 iff both i1 and i2 are assigned to room j with only a
+    # 15-min inter-exam gap (< 30 min); used to penalise tight scheduling (P2).
+    q = {
+        (i1, i2, j): model.addVar(vtype=GRB.BINARY, name=f"q_{i1}_{i2}_{j}")
+        for (i1, i2, j) in inter_only_15
     }
 
     model.update()
@@ -139,26 +187,31 @@ def allot_rooms(exams_df, rooms_df):
 
     model.setObjectiveN(
         -gp.quicksum(x[i, j] for (i, j) in compat),
-        index=0, priority=4, weight=1.0, name="max_assign",
+        index=0, priority=5, weight=1.0, name="max_assign",
     )
     model.setObjectiveN(
         gp.quicksum(y[j] for j in range(n_r)),
-        index=1, priority=3, weight=1.0, name="min_rooms",
+        index=1, priority=4, weight=1.0, name="min_rooms",
+    )
+    model.setObjectiveN(
+        gp.quicksum(z_g[c, j, ts] for (c, j, ts) in z_g),
+        index=2, priority=3, weight=1.0, name="min_rooms_per_course",
     )
     only_15 = compat - has_30_buffer
     model.setObjectiveN(
-        gp.quicksum(x[i, j] for (i, j) in only_15),
-        index=2, priority=2, weight=1.0, name="prefer_30_buffer",
+        gp.quicksum(x[i, j] for (i, j) in only_15)
+        + gp.quicksum(q[i1, i2, j] for (i1, i2, j) in inter_only_15),
+        index=3, priority=2, weight=1.0, name="prefer_30_buffer",
     )
     no_post_buffer = compat - has_15_post_buffer
     model.setObjectiveN(
         gp.quicksum(x[i, j] for (i, j) in no_post_buffer),
-        index=3, priority=1, weight=1.0, name="prefer_15_post",
+        index=4, priority=1, weight=1.0, name="prefer_15_post",
     )
     zone2_slots = {j for j in range(n_r) if rooms.at[j, "Zone"] != 1.0}
     model.setObjectiveN(
         gp.quicksum(x[i, j] for (i, j) in compat if j in zone2_slots),
-        index=4, priority=0, weight=1.0, name="prefer_zone1",
+        index=5, priority=0, weight=1.0, name="prefer_zone1",
     )
 
     # ------------------------------------------------------------------ #
@@ -178,81 +231,81 @@ def allot_rooms(exams_df, rooms_df):
         for i in room_to_exams[j]:
             model.addConstr(x[i, j] <= y[j], name=f"link_{i}_{j}")
 
-    # C2 – room capacity
+    # C2 – capacity per concurrent exam-group
     for j in range(n_r):
         cap = int(rooms.at[j, "Testing capacity"])
-        if room_to_exams[j]:
+        for ts, group in groups[j].items():
             model.addConstr(
-                gp.quicksum(x[i, j] for i in room_to_exams[j]) <= cap,
-                name=f"cap_{j}",
+                gp.quicksum(x[i, j] for i in group) <= cap,
+                name=f"cap_{j}_{ts}",
             )
 
-    # C3 – at most 3 distinct courses per room
-    for c in courses:
-        for j in range(n_r):
-            ce = [i for i in course_exams[c] if (i, j) in compat]
-            for i in ce:
-                model.addConstr(z[c, j] >= x[i, j], name=f"zl_{c}_{j}_{i}")
-            if ce:
+    # C3 – at most 3 distinct courses per concurrent exam-group
+    for j in range(n_r):
+        for ts, group in groups[j].items():
+            for c in courses:
+                ce = [i for i in group if i in course_exams[c]]
+                for i in ce:
+                    model.addConstr(
+                        z_g[c, j, ts] >= x[i, j],
+                        name=f"zgl_{c}_{j}_{ts}_{i}",
+                    )
+                if ce:
+                    model.addConstr(
+                        z_g[c, j, ts] <= gp.quicksum(x[i, j] for i in ce),
+                        name=f"zgu_{c}_{j}_{ts}",
+                    )
+            model.addConstr(
+                gp.quicksum(
+                    z_g[c, j, ts] for c in courses if (c, j, ts) in z_g
+                ) <= 3,
+                name=f"max3_{j}_{ts}",
+            )
+
+    # C4 – RD tag  →  concurrent exam-group capped at 20 students
+    for j in range(n_r):
+        cap = int(rooms.at[j, "Testing capacity"])
+        for ts, group in groups[j].items():
+            rd_here = [i for i in group if i in rd_indices]
+            for i in rd_here:
                 model.addConstr(
-                    z[c, j] <= gp.quicksum(x[i, j] for i in ce),
-                    name=f"zu_{c}_{j}",
+                    rd_flag_g[j, ts] >= x[i, j],
+                    name=f"rdl_{j}_{ts}_{i}",
+                )
+            if group and cap > 20:
+                model.addConstr(
+                    gp.quicksum(x[i, j] for i in group)
+                    <= cap - (cap - 20) * rd_flag_g[j, ts],
+                    name=f"rdc_{j}_{ts}",
                 )
 
-    for j in range(n_r):
-        model.addConstr(
-            gp.quicksum(z[c, j] for c in courses) <= 3,
-            name=f"max3_{j}",
-        )
-
-    # C4 – RD tag  →  room capped at 20 students
-    for j in range(n_r):
-        cap = int(rooms.at[j, "Testing capacity"])
-        rd_here = [i for i in rd_indices if (i, j) in compat]
-        for i in rd_here:
-            model.addConstr(rd_flag[j] >= x[i, j], name=f"rdl_{j}_{i}")
-        if room_to_exams[j] and cap > 20:
-            model.addConstr(
-                gp.quicksum(x[i, j] for i in room_to_exams[j])
-                <= cap - (cap - 20) * rd_flag[j],
-                name=f"rdc_{j}",
-            )
-
-    # C5 – PRIV / CODS  →  student must be alone in the room
+    # C5 – PRIV / CODS  →  student must be alone in their concurrent exam-group
     for i in priv_indices:
+        ts_i = _hhmm_to_minutes(exams.at[i, "Time_Start"])
         for j in exam_to_rooms[i]:
-            others = [k for k in room_to_exams[j] if k != i]
-            if others:
+            same_group = [
+                k for k in groups[j].get(ts_i, []) if k != i
+            ]
+            if same_group:
                 model.addConstr(
-                    gp.quicksum(x[k, j] for k in others)
+                    gp.quicksum(x[k, j] for k in same_group)
                     <= int(rooms.at[j, "Testing capacity"]) * (1 - x[i, j]),
                     name=f"priv_{i}_{j}",
                 )
 
-    # C6 – overlapping time slots for the same physical room share capacity
-    room_date_slots: dict[tuple, list[int]] = {}
-    for j in range(n_r):
-        key = (rooms.at[j, "Location_Name"], rooms.at[j, "Date"])
-        room_date_slots.setdefault(key, []).append(j)
-
-    for (loc, dt), slot_list in room_date_slots.items():
-        if len(slot_list) <= 1:
-            continue
-        cap = int(rooms.at[slot_list[0], "Testing capacity"])
-        for j1, j2 in combinations(slot_list, 2):
-            ts1, te1 = rooms.at[j1, "Time_Start"], rooms.at[j1, "Time_End"]
-            ts2, te2 = rooms.at[j2, "Time_Start"], rooms.at[j2, "Time_End"]
-            if ts1 < te2 and ts2 < te1:
-                pairs = [
-                    (i, j) for j in (j1, j2)
-                    for i in room_to_exams[j]
-                    if (i, j) in compat
-                ]
-                if pairs:
-                    model.addConstr(
-                        gp.quicksum(x[i, j] for (i, j) in pairs) <= cap,
-                        name=f"overlap_{loc}_{dt}_{j1}_{j2}",
-                    )
+    # C7 – non-overlapping exams in the same room slot
+    # Hard: block pairs whose inter-exam gap < 15 min
+    for (i1, i2, j) in inter_15_blocked:
+        model.addConstr(
+            x[i1, j] + x[i2, j] <= 1,
+            name=f"nooverlap_{i1}_{i2}_{j}",
+        )
+    # Link q to x: q=1 iff both exams are assigned to the same room with only 15-min gap
+    for (i1, i2, j) in inter_only_15:
+        model.addConstr(
+            q[i1, i2, j] >= x[i1, j] + x[i2, j] - 1,
+            name=f"ql_{i1}_{i2}_{j}",
+        )
 
     # ------------------------------------------------------------------ #
     #  Solve                                                             #
@@ -283,6 +336,7 @@ def allot_rooms(exams_df, rooms_df):
                 ]
                 course_set = {exams.at[i, "Course_ID"] for i in assigned_here}
                 print(
+                    f"  {rooms.at[j, 'slot_id']}  "
                     f"  {rooms.at[j, 'Location_Name']:>8s}  "
                     f"{rooms.at[j, 'Date']}  "
                     f"{int(rooms.at[j, 'Time_Start']):04d}-{int(rooms.at[j, 'Time_End']):04d}  "
