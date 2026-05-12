@@ -31,13 +31,16 @@ git clone https://github.com/bhaveshgoyal27/SDS-ATP
 The pipeline reads and writes data through Google Sheets using `get_sheet_as_df()` and `update_sheet_with_df_with_columns()` in `utils/access_google_sheets.py`. You can request access to our existing dataset — [`SP26 Input`](https://docs.google.com/spreadsheets/d/1tW0w2RplGNepea-NPtnmjBRx7JGCRdU_pulBitOxg5Y/edit?usp=sharing) and [`SP26 Output`](https://docs.google.com/spreadsheets/d/1R96mbi-p1sbpjBWJH8FOt8GU_e5pLmQPz35_QO48baA/edit?usp=sharing) workbooks.
 **Alternatively**, if you want to create your own workbooks, update the `file_name` arguments in `service/prelims.py` to match your workbook names and structure the sheets as follows:
 - **Input workbook** (default: `"SP26 Input"`): must contain the following sheets:
+
 | Sheet name | Purpose | Required columns |
 |------------|---------|-----------------|
 | `Courses Raw Form` | Instructor conflict-exam preferences | `CRN`, `Class start timings`, `Class end timings`, `Days the class is offered`, + multi-select preference column (exploded into 10 binary columns) |
 | `AIM Data` | Exam records from the AIM system | `Exam_ID`, `Student_ID`, `Course_ID`, `Date`, `Time_Start`, `Time_End`, `Multiplier`, `Status`, `Tags` |
 | `LIV25` | Master room list | `Location_Name`, `Testing capacity`, `Zone`, `S25` (Y/N), `AIM` (Y/N) |
 | `Room Availability` | Room date/time windows | `slot_id`, `Location_Name`, `Date`, `Time_Start`, `Time_End` |
+
 - **Output workbook** (default: `"SP26 Output"`): must contain:
+
 | Sheet name | Purpose | Required columns |
 |------------|---------|-----------------|
 | `SP26 Prelim` | Internal tracking sheet | `Exam_ID`, `Student_ID`, `Course_ID`, `Original Date`, `Original Time_Start`, `Original Time_End`, `Date`, `Time_Start`, `Time_End`, `Room No`, `Internal Status`, `Status`, `Tags`, `Multiplier` |
