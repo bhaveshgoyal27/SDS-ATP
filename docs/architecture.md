@@ -29,39 +29,35 @@ There are **no LLM agents or prompts**; behavior is fully deterministic (Python 
 
 ## System context
 
+GitHub’s Mermaid renderer often breaks on **undirected links** (`---`), **newlines** inside node text, **quoted `subgraph` titles** with special characters, and sometimes **edges between subgraphs**. This version uses a **flat** flowchart: only `-->` and single-line `[labels]`.
+
 ```mermaid
 flowchart TB
-  subgraph operators["Operators / data owners"]
-    GSIn["Google Sheets: SP26 Input\n(Courses Raw, AIM, LIV25, Room Availability)"]
-    GSOut["Google Sheets: SP26 Output\n(SP26 Prelim)"]
-    Mock["Google Sheets: FA25 NEW MOCK\n(Sign Ups)"]
-  end
-
-  subgraph local["Local runtime"]
-    JSON["timetables/student_timetable.json"]
-    R["runner.py"]
-    P["Prelims\nservice/prelims.py"]
-    FS["resolve_time\nutils/find_slots.py"]
-    GR["allot_rooms\nutils/gurobi_solver.py"]
-    SA["Service account JSON\nkeys/atp-poc1-....json"]
-  end
-
-  subgraph external["External services"]
-    GAPI["Google Sheets API\n(gspread / oauth2client)"]
-    GU["Gurobi Optimizer\n(gurobipy)"]
-  end
+  GSIn[SP26 Input Sheets]
+  GSOut[SP26 Output Sheets]
+  Mock[FA25 Mock Sign Ups]
+  TTFile[student timetable JSON file]
+  R[runner py]
+  P[Prelims]
+  FS[find slots resolve time]
+  GR[gurobi allot rooms]
+  SA[service account key]
+  GAPI[Sheets API]
+  GU[Gurobi]
 
   R --> P
   P --> GAPI
-  GAPI --- GSIn
-  GAPI --- GSOut
-  GAPI --- Mock
-  P --> JSON
+  GAPI --> GSIn
+  GAPI --> GSOut
+  GAPI --> Mock
+  P --> TTFile
   P --> FS
   P --> GR
   SA --> GAPI
   GR --> GU
 ```
+
+Plain-text fallback (same relationships): `runner.py` → `Prelims` → reads or writes Google Sheets via gspread; `Prelims` reads `timetables/student_timetable.json`, calls `resolve_time` and `allot_rooms`; service-account JSON authenticates Sheets; `allot_rooms` calls Gurobi.
 
 ---
 
@@ -69,25 +65,25 @@ flowchart TB
 
 ```mermaid
 sequenceDiagram
-  participant Runner as runner.py
-  participant Prelims as Prelims
-  participant Sheets as Google Sheets
-  participant TT as student_timetable.json
-  participant FS as resolve_time
-  participant GR as Gurobi allot_rooms
+  participant Runner
+  participant Prelims
+  participant Sheets
+  participant Timetable
+  participant FindSlots
+  participant Gurobi
 
-  Runner->>Prelims: runner()
-  Prelims->>Sheets: process_course_list
-  Prelims->>Sheets: get_valid_exams (AIM + Output)
-  Prelims->>TT: get_timetables()
-  Prelims->>FS: get_time_slots(...)
-  FS-->>Prelims: exams with times / unresolved
-  Prelims->>Sheets: merge SP26 Prelim by Exam_ID
-  Prelims->>Sheets: get_rooms
-  Prelims->>Sheets: get_exams_df (Slot booked)
-  Prelims->>GR: allot_rooms(exams_df, rooms_df)
-  GR-->>Prelims: Room No + status updates
-  Prelims->>Sheets: merge SP26 Prelim by Exam_ID
+  Runner->>Prelims: runner
+  Prelims->>Sheets: process course list
+  Prelims->>Sheets: get valid exams
+  Prelims->>Timetable: get timetables
+  Prelims->>FindSlots: get time slots
+  FindSlots-->>Prelims: exams updated
+  Prelims->>Sheets: merge SP26 Prelim
+  Prelims->>Sheets: get rooms
+  Prelims->>Sheets: get exams df
+  Prelims->>Gurobi: allot rooms
+  Gurobi-->>Prelims: room assignments
+  Prelims->>Sheets: merge SP26 Prelim
 ```
 
 ---
