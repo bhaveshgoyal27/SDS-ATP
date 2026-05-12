@@ -1,5 +1,7 @@
 # SDS-ATP Workflow Analysis
 
+For a concise architecture view (components, diagrams, MILP design rationale), see **[architecture.md](architecture.md)**.
+
 ## Overview
 
 SDS-ATP is a two-phase exam scheduling and room allocation system for students with special testing needs (accommodations). It reads data from Google Sheets, resolves time-slot conflicts, and assigns rooms using a Gurobi Integer Linear Programming (ILP) solver.
@@ -179,12 +181,12 @@ Google Sheets (SP26 Input)          Local Files
 2. Selects `[Location_Name, Testing capacity, Zone]`
 3. Left-joins Room Availability with the filtered room list on `Location_Name`
 
-**Output:** `rooms.csv` with columns: `[slot_id, Location_Name, Date, Time_Start, Time_End, Max_Cap, Zone]`
+**Output:** `rooms.csv` — merged **Room Availability** rows plus `Testing capacity` and `Zone` from LIV25 (column set follows the availability sheet, including identifiers such as `slot_id` when present).
 
-Example:
+Example (illustrative):
 
 ```
-slot_id,Location_Name,Date,Time_Start,Time_End,Max_Cap,Zone
+slot_id,Location_Name,Date,Time_Start,Time_End,Testing capacity,Zone
 s0001,ADW109,12/15/2024,800,1200,14,1
 s0002,ADW109,12/15/2024,1300,1900,14,1
 s0022,ASA109,12/15/2024,800,2200,40,2
@@ -217,9 +219,9 @@ Exam_ID,Student_ID,Course_ID,...,Date,Time_Start,Time_End,...,Tags,...
 | Dataset     | Records               | Key columns                                                       |
 | ----------- | --------------------- | ----------------------------------------------------------------- |
 | `exams.csv` | ~30 exams (mock data) | Exam_ID, Student_ID, Course_ID, Date, Time_Start, Time_End, Tags  |
-| `rooms.csv` | ~51 room-slots        | slot_id, Location_Name, Date, Time_Start, Time_End, Max_Cap, Zone |
+| `rooms.csv` | ~51 room-slots        | slot_id (if present), Location_Name, Date, Time_Start, Time_End, Testing capacity, Zone |
 
-The solver's job: assign each exam to a room slot such that the exam's scheduled time fits within the room's available window, while respecting capacity, tag-based accommodations, and course diversity constraints.
+The solver's job: assign each exam to **at most one** room availability row (`j`) such that the exam fits the row’s date/time window and **15-minute** room pre-buffer; then pack exams into **concurrent groups** (same `Time_Start` within `j`) under capacity and course limits, enforce **RD** / **PRIV**/**CODS** rules per group, and forbid gaps **under 15 minutes** between **non-concurrent** exams in the same slot (with a soft preference toward **30+** minute gaps).
 
 ---
 
@@ -227,126 +229,93 @@ The solver's job: assign each exam to a room slot such that the exam's scheduled
 
 **Source:** `utils/gurobi_solver.py`
 
+### Concurrent exam-groups
+
+Within each room slot row `j` (one availability window), exams are grouped by **exact** start time `Time_Start` (in minutes). Capacity, the “max 3 courses” rule, RD limits, and PRIV/CODS isolation apply **per concurrent group** `(j, ts)`, not necessarily across the entire row. Multiple non-overlapping sessions can share one slot row if **inter-exam gaps** satisfy C7.
+
 ### Decision Variables
 
-| Variable     | Type   | Meaning                                            |
-| ------------ | ------ | -------------------------------------------------- |
-| `x[i,j]`     | Binary | 1 if exam `i` is assigned to room slot `j`         |
-| `y[j]`       | Binary | 1 if room slot `j` is used (has at least one exam) |
-| `z[c,j]`     | Binary | 1 if course `c` has any exam in room slot `j`      |
-| `rd_flag[j]` | Binary | 1 if any RD-tagged student is in room slot `j`     |
+| Variable | Type | Meaning |
+| -------- | ---- | ------- |
+| `x[i,j]` | Binary | 1 if exam `i` uses room slot `j`. |
+| `y[j]` | Binary | 1 if slot `j` has at least one exam. |
+| `z_g[c,j,ts]` | Binary | 1 if course `c` appears in slot `j` in the concurrent group that starts at `ts`. |
+| `rd_flag_g[j,ts]` | Binary | 1 if any RD-tagged exam is in group `(j,ts)`. |
+| `q[i1,i2,j]` | Binary | Linked so that `q=1` when both exams are in `j` with a **15–29 minute** gap between their windows (used in the P2 objective). |
 
 ### Compatibility Pre-computation
 
-Before building the model, the solver pre-computes which (exam, room) pairs are compatible. An exam `i` is compatible with room slot `j` if and only if:
+An exam `i` is compatible with slot `j` if and only if:
 
-- Same date: `exam.Date == room.Date`
-- Exam fits within room window: `exam.Time_Start >= room.Time_Start AND exam.Time_End <= room.Time_End`
+- Same `Date`
+- Exam interval inside the room row window
+- **≥ 15 minutes** between room open and exam start (`_hhmm_to_minutes`)
 
-This creates a sparse set of valid assignment pairs, reducing the number of variables and constraints.
+Optional quality flags:
+
+- `has_30_buffer`: ≥ 30 minutes pre-open
+- `has_15_post_buffer`: ≥ 15 minutes after exam end before room close
+
+Only compatible pairs receive an `x[i,j]` variable (sparse model).
 
 ### Objective Hierarchy
 
-The solver uses Gurobi's multi-objective capability with three prioritized objectives (all formulated as minimization):
+Gurobi `setObjectiveN` (all minimization; higher priority index solved first):
 
-| Priority         | Objective                        | Formula                                  |
-| ---------------- | -------------------------------- | ---------------------------------------- |
-| **P3 (highest)** | Maximize exam assignments        | `minimize -sum(x[i,j])`                  |
-| **P2**           | Minimize rooms used              | `minimize sum(y[j])`                     |
-| **P1**           | Prefer 30-minute pre-exam buffer | `minimize sum(x[i, j]) in only_15`       |
-| **P0 (lowest)**  | Prefer Zone-1 (nearby)           | `minimize sum(x[i,j] where j in Zone-2)` |
-
-**How this hierarchy works:** Gurobi solves objectives in priority order. It first finds the maximum number of assignable exams. Among all solutions achieving that maximum, it picks the one using the fewest rooms. Among those, it prefers assignments where the room opens at least 30 minutes before the exam (rather than the hard-minimum 15 minutes). Finally, among those, it minimizes Zone-2 usage.
+| Priority | Name | Description |
+| -------- | ---- | ----------- |
+| **P5** | `max_assign` | `minimize -sum(x[i,j])` — maximize assigned exams. |
+| **P4** | `min_rooms` | `minimize sum(y[j])` — minimize distinct slot rows used. |
+| **P3** | `min_rooms_per_course` | `minimize sum(z_g[...])` — **spread each course across fewer** `(room, start-time)` groups (administrative clustering). |
+| **P2** | `prefer_30_buffer` | Penalize room opens with only **15–29 min** pre-buffer (`only_15`) **and** penalize inter-exam pairs in `inter_only_15` via `sum(q)`. |
+| **P1** | `prefer_15_post` | Penalize assignments missing **≥15 min** post-exam buffer before room close. |
+| **P0** | `prefer_zone1` | Penalize Zone-2 assignments (lowest priority). |
 
 ### Constraints
 
 #### C1 — Single Assignment
 
-```
-For each exam i: sum(x[i,j] for j in compatible_rooms[i]) <= 1
-```
+For each exam `i`: `sum_j x[i,j] <= 1` over compatible `j`.
 
-Each exam is assigned to **at most one** room slot. (Not "exactly one" — some exams may be unassignable if rooms are full.)
+#### C2 — Capacity per concurrent group
 
-#### C2 — Room Capacity
+For each `(j, ts)` group: `sum_{i in group(j,ts)} x[i,j] <= Testing capacity`.
 
-```
-For each room j: sum(x[i,j] for i in compatible_exams[j]) <= capacity[j]
-```
+#### C3 — At most 3 courses per concurrent group
 
-The number of students assigned to a room slot cannot exceed its testing capacity.
+Uses `z_g[c,j,ts]` with standard linking (`z_g >= x` for exams of course `c` in that group, `z_g <= sum x` upper bound) and `sum_c z_g[c,j,ts] <= 3`.
 
-#### C3 — Course Diversity (max 3 courses per room)
+**Rationale:** Limits proctoring load for **simultaneous** exams in the same room window.
 
-Uses auxiliary `z[c,j]` variables to track which courses are present in each room:
+#### C4 — RD tag within a concurrent group
 
-- Linking: `z[c,j] >= x[i,j]` for each exam `i` of course `c` (if any exam of course `c` is in room `j`, the indicator is forced to 1)
-- Upper bound: `z[c,j] <= sum(x[i,j] for i in course_exams[c])` (indicator is 0 if no exams of course `c` are assigned)
-- Enforcement: `sum(z[c,j] for all courses c) <= 3`
+For each `(j, ts)` with physical cap > 20: if any RD exam is in the group, the group's headcount is capped at **20** (same big-M pattern as before, but scoped to `(j,ts)` via `rd_flag_g`).
 
-**Rationale:** Limits proctoring complexity. Having more than 3 different exams in one room makes administration difficult.
+#### C5 — PRIV / CODS within a concurrent group
 
-#### C4 — RD Tag Capacity Reduction
+For a PRIV/CODS exam `i` at start time `ts` in slot `j`, no other exam with the **same** `(j, ts)` may be assigned. Other **different** start times in the same slot row may still be used if C7 gap rules allow.
 
-```
-For each room j with cap > 20:
-  rd_flag[j] >= x[i,j]  for each RD-tagged exam i
-  sum(x[i,j]) <= cap - (cap - 20) * rd_flag[j]
-```
+#### C6 — Room pre-buffer (compatibility + objective)
 
-If **any** student with the RD (Reader/Disability) tag is placed in a room, that room's effective capacity drops to 20, regardless of its physical capacity. This uses a big-M linearization: when `rd_flag[j] = 1`, the right-hand side becomes `cap - cap + 20 = 20`.
+Hard **15-minute** minimum is enforced in compatibility; **30-minute** pre-open is preferred via the P2 term on `only_15`.
 
-**Rationale:** RD students require a quieter, less crowded environment for their reader accommodations.
+#### C7 — Inter-exam spacing in the same slot row
 
-#### C5 — Privacy (PRIV / CODS tags)
+For each pair of exams that could both go to slot `j` with **non-concurrent** windows:
 
-```
-For each PRIV/CODS exam i and compatible room j:
-  sum(x[k,j] for k != i) <= cap * (1 - x[i,j])
-```
+- If the gap between windows is **under 15 minutes**, `x[i1,j] + x[i2,j] <= 1` (**hard**).
+- If the gap is **15–29 minutes**, both may be assigned, but `q[i1,i2,j]` is forced on when both are assigned and contributes to **P2** so the solver prefers **30+** minute spacing when trade-offs exist.
 
-If a PRIV or CODS student is assigned to room `j` (`x[i,j] = 1`), then all other assignments to that room are forced to 0. The student takes the exam **alone** in the room.
-
-**Rationale:** These students require a private testing environment due to their accommodations (e.g., reading aloud, dictation software).
-
-#### C6 — Overlapping Time Slots (shared capacity)
-
-```
-For overlapping slots j1, j2 in the same physical room on the same date:
-  sum(x[i,j] for i,j in both slots) <= capacity
-```
-
-If a physical room has two time slots that overlap (e.g., 8:00-12:00 and 10:00-14:00), they share a single capacity limit. This prevents over-filling the physical space.
-
-#### C7 — Pre-Exam Buffer (15-minute hard minimum, 30-minute soft preference)
-
-C7 is enforced in two layers — a **hard constraint** baked into the compatibility pre-computation and a **soft preference** in the objective hierarchy.
-
-**Hard constraint (15-minute minimum):**
-During compatibility pre-computation, an exam `i` is only considered compatible with room slot `j` if the room opens at least 15 minutes before the exam starts. Time values are converted from HHMM format to minutes since midnight using `_hhmm_to_minutes()` for accurate arithmetic:
-
-```
-Compatible if:
-  exam.Date == room.Date
-  AND  _hhmm_to_minutes(exam.Time_Start) - 15 >= _hhmm_to_minutes(room.Time_Start)
-  AND  _hhmm_to_minutes(exam.Time_End)         <= _hhmm_to_minutes(room.Time_End)
-```
-
-Any (exam, room) pair that doesn't meet the 15-minute buffer is excluded entirely — the solver cannot assign an exam to that room slot regardless of other constraints.
-
-**Soft preference (30-minute buffer):**
-Among compatible pairs, the solver further tracks which pairs have a full 30-minute buffer (`has_30_buffer` set). Pairs that are compatible but only have a 15–29 minute buffer land in the `only_15` set (`compat - has_30_buffer`). The P1 objective minimizes assignments in `only_15`, steering the solver toward rooms that open 30+ minutes early whenever possible — without sacrificing assignment count or room efficiency.
-
-**Rationale:** Proctors need setup time before students arrive. 15 minutes is the operational minimum; 30 minutes is preferred to allow for room arrangement, material distribution, and technology checks.
+**Rationale:** Staggered sessions in one booked block need explicit turnover time; concurrent exams (identical start) are exempt from inter-exam gap rules.
 
 ### Solver Output
 
 After optimization, the solver:
 
-1. Updates `Room No` with the assigned room's `Location_Name`
-2. Sets `Internal Status = "Room allocated"` for assigned exams
-3. Prints a summary: exams assigned, rooms used, per-room breakdown (students, courses)
-4. Lists any unassigned exams
+1. Sets `Room No` to `Location_Name` for assigned rows.
+2. Sets `Internal Status = "Room allocated"` for assigned exams.
+3. Prints counts and a per-slot summary (includes `slot_id` when present in `rooms_df`).
+4. Lists unassigned exams.
 
 ---
 
@@ -369,12 +338,12 @@ After optimization, the solver:
 
 | #   | Edge Case                                             | Risk                                   | Current Behavior                                                              |
 | --- | ----------------------------------------------------- | -------------------------------------- | ----------------------------------------------------------------------------- |
-| 7   | **More PRIV/CODS students than available solo rooms** | Not enough rooms for all private exams | Some PRIV exams go unassigned; P2 objective still maximizes total assignments |
-| 8   | **RD student in large room (cap > 20)**               | Capacity drops to 20, wasting space    | By design — RD accommodation takes priority over space efficiency             |
-| 9   | **More than 3 courses in same time window**           | Spillover to additional rooms needed   | C3 constraint forces the 4th+ course into separate rooms                      |
+| 7   | **More PRIV/CODS students than available solo concurrent groups** | Not enough room rows / groups for all private exams | Some PRIV exams go unassigned; **P5** objective still maximizes total assignments first |
+| 8   | **RD student in large room (cap > 20)**               | Concurrent group capped at 20 when RD present | By design — scoped to the **(room slot, start time)** group |
+| 9   | **More than 3 courses at the same start time**        | Spillover to additional rooms or slots needed | C3 applies **per (j, ts)** concurrent group |
 | 10  | **All rooms full on a given date**                    | Some exams unassigned                  | Solver returns partial assignment; unassigned exams reported                  |
-| 11  | **Overlapping room slots (C6)**                       | Shared capacity could be confusing     | Correctly implemented — uses pairwise overlap detection                       |
-| 12  | **Only Zone-2 rooms available**                       | Solver should still assign             | Yes — Zone preference is P0 (lowest priority), won't block assignments        |
+| 11  | **Staggered exams in one long slot row**              | Tight back-to-back windows             | **Under 15 min** gap blocks both; **15–29 min** allowed but penalized in **P2** toward **30+ min** gaps |
+| 12  | **Only Zone-2 rooms available**                       | Solver should still assign             | Yes — Zone preference is **P0** (lowest priority), won't block assignments        |
 
 #### Data Integrity
 
@@ -382,7 +351,7 @@ After optimization, the solver:
 | --- | -------------------------------- | ----------------------------------------------- | ------------------------------------------------------- |
 | 13  | **Mismatched CRN**               | Exam's Course_ID not in course preference table | `resolve_time()` sets "Unresolved - no course pref"     |
 | 14  | **Student not in timetable**     | No class schedule to check                      | Treated as no conflicts — all slots are free            |
-| 15  | **Room with capacity 0 or null** | Would break solver                              | Already handled — solver drops these rows (lines 33-34) |
+| 15  | **Room with capacity 0 or null** | Would break solver                              | Already handled — solver drops these rows (see `gurobi_solver.py` after loading rooms) |
 
 ### Known Bug
 
@@ -399,13 +368,13 @@ After optimization, the solver:
 | Scenario                   | Exams Setup                                    | Rooms Setup                                   | Expected Result                                             |
 | -------------------------- | ---------------------------------------------- | --------------------------------------------- | ----------------------------------------------------------- |
 | **Basic happy path**       | 5 exams, no special tags, different courses    | 2 rooms with capacity 10 each                 | All 5 assigned, Zone-1 preferred                            |
-| **PRIV saturation**        | 3 PRIV students, same date/time                | 2 small rooms (cap 8 each)                    | Only 2 assigned (each alone); 1 unassigned                  |
-| **RD capacity squeeze**    | 25 students (1 with RD tag), same time         | 1 room with cap=30                            | Room capped at 20; 5 students unassigned                    |
-| **3-course limit**         | 4 students from 4 different courses, same time | 1 room with cap=10                            | Only 3 courses fit; 4th needs another room or is unassigned |
+| **PRIV saturation**        | 3 PRIV students, **same** date/time (same concurrent group) | 2 small rooms (cap 8 each)                    | At most 2 concurrent groups can be solo; 1 unassigned |
+| **RD capacity squeeze**    | 25 students (1 with RD tag), **same** start time in one slot | 1 room row with cap=30                        | That concurrent group capped at 20; 5 unassigned |
+| **3-course limit**         | 4 students from 4 different courses, **same** start time   | 1 room row with cap=10                        | Only 3 courses fit in the group; 4th needs another row or time |
 | **Zone preference**        | 5 exams, same time                             | 1 Zone-1 room (cap=3) + 1 Zone-2 room (cap=3) | Zone-1 fills first (3 students), Zone-2 gets remaining 2    |
-| **Overlapping room slots** | 8 exams across two overlapping time windows    | 1 room with 2 overlapping slots (cap=5)       | Shared capacity = 5 total, not 5+5                          |
+| **Inter-exam gap**         | Two exams, same slot row, **non-concurrent** windows with 10 min gap | 1 room row covering both                    | At most one of the two can be assigned (hard **under 15 min** rule) |
 | **No compatible rooms**    | Exams on 12/25/2024                            | No rooms available 12/25                      | All unassigned, solver returns gracefully                   |
-| **Mixed tags**             | 1 PRIV + 1 RD + 3 regular, same time           | 3 rooms (cap 8, 25, 10)                       | PRIV gets solo room; RD caps the 25-cap room to 20          |
+| **Mixed tags**             | 1 PRIV + 1 RD + 3 regular, **same** start time | 3 room rows (cap 8, 25, 10)                   | PRIV alone in its concurrent group; RD caps that group to 20 in a large-cap row |
 
 #### For the time slot resolver (use existing test helpers in `test/test_resolve_slots.py`):
 
@@ -440,7 +409,7 @@ exams_df = pd.DataFrame([
 ])
 
 rooms_df = pd.DataFrame([
-    {"Location_Name": "ROOM_A", "Date": "12/15/2024",
+    {"slot_id": "s0001", "Location_Name": "ROOM_A", "Date": "12/15/2024",
      "Time_Start": 800, "Time_End": 1200,
      "Testing capacity": 30, "Zone": 1}
 ])
@@ -456,9 +425,9 @@ result = allot_rooms(exams_df, rooms_df)
 | -------- | ------------------------ | -------------------------------- | ----------------------------- |
 | **NOAM** | No Morning               | Exam cannot start before 9:00 AM | None                          |
 | **NOPM** | No PM/Evening            | Exam cannot end after 6:00 PM    | None                          |
-| **RD**   | Reader/Disability        | None                             | Room capped at 20 students    |
-| **PRIV** | Private                  | None                             | Student must be alone in room |
-| **CODS** | Code Switch              | None                             | Student must be alone in room |
+| **RD**   | Reader/Disability        | None                             | Concurrent group capped at 20 students when room cap > 20 |
+| **PRIV** | Private                  | None                             | Must be **alone in the concurrent exam-group** (same room slot + start time) |
+| **CODS** | Code Switch              | None                             | Same as PRIV for room grouping |
 | **ACDF** | Academic Disability Flag | Tracking only                    | None                          |
 | **COMP** | Component-based          | Tracking only                    | None                          |
 
