@@ -72,7 +72,6 @@ class Prelims:
 
     def get_time_slots(self, course_pref, exams_df, st_timetables):
         new_df = resolve_time(course_pref, exams_df, st_timetables)
-        new_df.to_csv("result1.csv", index=False)
         update_sheet_with_df_with_columns("SP26 Output", "SP26 Prelim", new_df, "Exam_ID")
 
     def get_rooms(self):
