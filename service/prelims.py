@@ -3,7 +3,6 @@ import datetime
 import pandas as pd
 from utils.access_google_sheets import get_sheet_as_df, update_sheet_with_df, update_sheet_with_df_with_columns
 from utils.find_slots import resolve_time
-import utils.gorubi_solver as gorubi_solver
 
 class Prelims:
     def __init__(self):
@@ -15,10 +14,9 @@ class Prelims:
         exams_df = self.get_valid_exams()
         st_timetables = self.get_timetables()
         self.get_time_slots(course_pref, exams_df, st_timetables)
-        
-        exams_time_df = self.get_exams_time_df()
-        rooms_df = self.get_available_rooms()
-        # gorubi_solver.assign_rooms(exams_time_df, rooms_df)
+        rooms_df = self.get_rooms()
+        exams_df = self.get_exams_df()
+        self.allot_rooms(exams_df, rooms_df)
 
     def process_course_list(self):
         df = get_sheet_as_df("SP26 Input", "Courses Raw Form")
@@ -76,43 +74,27 @@ class Prelims:
         new_df = resolve_time(course_pref, exams_df, st_timetables)
         update_sheet_with_df_with_columns("SP26 Output", "SP26 Prelim", new_df, "Exam_ID")
 
-    def get_exams_time_df(self):
+    def get_rooms(self):
+        rooms_df = get_sheet_as_df("SP26 Input", "LIV25")
+        liv25 = get_sheet_as_df("SP26 Input", "Room Availability")
+        rooms_df = rooms_df[(rooms_df["S25"] == "Y") & (rooms_df["AIM"] == "Y")]
+        rooms_df = rooms_df[["Location_Name", "Testing capacity", "Zone"]]
+        liv25 = liv25.merge(rooms_df, on="Location_Name", how="left")
+        liv25.to_csv("rooms.csv", index=False)
+        return liv25
+
+    def get_exams_df(self):
         exams_df = get_sheet_as_df("SP26 Output", "SP26 Prelim")
         exams_df = exams_df.loc[exams_df['Internal Status'] == "Slot booked"]
         exams_df.to_csv("exams.csv", index=False)
         return exams_df
 
-    def get_available_rooms(self):
-        availability_df = get_sheet_as_df("SP26 Input", "Room Availability")
-        liv25_df = get_sheet_as_df("SP26 Input", "LIV25")
-        liv25_df = liv25_df[(liv25_df["S25"] == "Y") & (liv25_df["AIM"] == "Y")]
-        rooms_df = availability_df.merge(liv25_df[["Location_Name", "Max_Cap", "Zone"]], on="Location_Name", how="inner")
-        rooms_df.to_csv("rooms.csv", index=False)
-        return rooms_df
-
-    def assign_rooms(self, groups_df, alloted_df):
-        output_df = get_sheet_as_df("SP26 Output", "SP26 Prelim")
-
-        exam_room = {}
-
-        for group_id, group_alloc in alloted_df.groupby("group_id"):
-            exam_ids = groups_df.loc[groups_df["group_id"] == group_id, "Exam_ID"].tolist()
-
-            if len(group_alloc) == 1:
-                room = group_alloc.iloc[0]["Location_Name"]
-                for eid in exam_ids:
-                    exam_room[eid] = room
-            else:
-                slots = group_alloc.sort_values("students_count", ascending=False).reset_index(drop=True)
-                idx = 0
-                for _, slot in slots.iterrows():
-                    count = int(slot["students_count"])
-                    for eid in exam_ids[idx:idx + count]:
-                        exam_room[eid] = slot["Location_Name"]
-                    idx += count
-
-        output_df["Room No"] = output_df["Exam_ID"].map(exam_room).fillna(output_df["Room No"])
-        output_df.loc[output_df["Exam_ID"].isin(exam_room), "Internal Status"] = "Room allocated"
-
-        update_sheet_with_df_with_columns("SP26 Output", "SP26 Prelim", output_df, "Exam_ID")
+    def allot_rooms(self, exams_df, rooms_df):
+        from utils.gurobi_solver import allot_rooms as solve_rooms
+        result_df = solve_rooms(exams_df, rooms_df)
+        result_df.to_csv("result.csv", index=False)
+        update_sheet_with_df_with_columns(
+            "SP26 Output", "SP26 Prelim", result_df, "Exam_ID"
+        )
+        return result_df
 
