@@ -73,19 +73,26 @@ python runner.py
 ## Repository Map
 
 ```
+├── runner.py                       # Entry point — runs the full pipeline end-to-end
 ├── service/
-│   └── prelims.py              # Pipeline orchestrator (Prelims class)
+│   └── prelims.py                  # Pipeline orchestrator
 ├── utils/
-│   ├── find_slots.py           # Phase 1 — Time-slot resolution algorithm
-│   └── gurobi_solver.py        # Phase 2 — ILP room allocation (allot_rooms)
+│   ├── find_slots.py               # Phase 1 — Time-slot resolution algorithm
+│   ├── gurobi_solver.py            # Phase 2 — ILP room allocation (allot_rooms)
+│   ├── access_google_sheets.py     # Helper functions accessing data
 ├── timetables/
-│   └── student_timetable.json  # Student weekly class schedules
+│   └── student_timetable.json      # Student weekly class schedules
 ├── test/
-│   └── test_resolve_slots.py   # Unit tests for time-slot resolution
-│   docs/
-│   └── architecture.md         #
-│   └── workflow_analysis.md    #
-├── exams.csv                   # Exams ready for room assignment (generated after running the code)
-├── rooms.csv                   # Room availability slots (generated after running the code)
+│   └── test_resolve_slots.py       # Unit tests for time-slot resolution
+├── docs/
+│   ├── working_system.md           # Clear instructions for running the system locally
+│   ├── architecture.md             # Documentation of pipeline components, data flow, model choices, prompt or agent designs, external services, and dependencies
+│   ├── workflow_analysis.md        # Detailed analysis of the pipeline workflow
+│   ├── evaluation_and_testing.md   # Review and evaluation of the pipeline output
+│   ├── user_guide.md               # User guide for our clients/stakeholders
+│   ├── handoff.md                  # Limitations and future steps
+│   └── SDS_ATP_math.pdf            # Math documentation
+├── exams.csv                       # Exams ready for room assignment (generated after running the code)
+├── rooms.csv                       # Room availability slots (generated after running the code)
 └── README.md
 ```
