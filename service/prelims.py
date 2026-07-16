@@ -3,6 +3,7 @@ import datetime
 import pandas as pd
 from utils.access_google_sheets import get_sheet_as_df, update_sheet_with_df, update_sheet_with_df_with_columns
 from utils.find_slots import resolve_time
+from utils.gurobi_solver_grouped import allot_rooms as solve_rooms
 
 class Prelims:
     def __init__(self):
@@ -29,7 +30,7 @@ class Prelims:
         for v in values:
             df[v] = df[column_name].apply( lambda lst: 'Y' if v in lst else 'N')
         update_sheet_with_df("FA25 NEW MOCK", "Sign Ups", df)
-        v1 = ["CRN", "Class start timings", "Class end timings", "Days the class is offered"]
+        v1 = ["CRN", "Class start timings", "Class end timings", "Primary course", "Primary CRN", "Days the class is offered"]
         v1.extend(values)
         df = df[v1]
         update_sheet_with_df("SP26 Input", "Courses Form filtered", df)
@@ -72,6 +73,7 @@ class Prelims:
 
     def get_time_slots(self, course_pref, exams_df, st_timetables):
         new_df = resolve_time(course_pref, exams_df, st_timetables)
+        new_df.to_csv("result1.csv", index=False)
         update_sheet_with_df_with_columns("SP26 Output", "SP26 Prelim", new_df, "Exam_ID")
 
     def get_rooms(self):
@@ -90,11 +92,11 @@ class Prelims:
         return exams_df
 
     def allot_rooms(self, exams_df, rooms_df):
-        from utils.gurobi_solver import allot_rooms as solve_rooms
-        result_df = solve_rooms(exams_df, rooms_df)
+        result_df, bookings_df = solve_rooms(exams_df, rooms_df)
         result_df.to_csv("result.csv", index=False)
+        bookings_df.to_csv("room_bookings.csv", index=False)
         update_sheet_with_df_with_columns(
             "SP26 Output", "SP26 Prelim", result_df, "Exam_ID"
         )
-        return result_df
+        return result_df, bookings_df
 
