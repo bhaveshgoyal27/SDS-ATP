@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>Mathematical Formulation — gurobi_solver_grouped.py</title>
+  <script>
+    window.MathJax = {
+      tex: {
+        inlineMath: [['\\(', '\\)']],
+        displayMath: [['\\[', '\\]']],
+        processEscapes: true
+      },
+      options: {
+        skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']
+      }
+    };
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
+  <style>
+@page {
+  size: letter;
+  margin: 0.7in 0.75in 0.75in 0.75in;
+}
+:root {
+  --ink: #1a1a1a;
+  --muted: #4a5568;
+  --rule: #d0d5dd;
+  --accent: #0b3d5c;
+  --soft: #f4f7fa;
+}
+* { box-sizing: border-box; }
+html { font-size: 10.5pt; }
+body {
+  font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  color: var(--ink);
+  line-height: 1.45;
+  margin: 0;
+  padding: 0;
+}
+header.doc-header {
+  border-bottom: 2.5px solid var(--accent);
+  padding-bottom: 0.55rem;
+  margin-bottom: 1.1rem;
+}
+header.doc-header .eyebrow {
+  color: var(--accent);
+  font-size: 0.78rem;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin: 0 0 0.25rem 0;
+}
+h1 {
+  font-size: 1.55rem;
+  font-weight: 700;
+  color: var(--accent);
+  margin: 0 0 0.35rem 0;
+  line-height: 1.25;
+}
+.subtitle {
+  color: var(--muted);
+  font-size: 0.92rem;
+  margin: 0;
+}
+h2 {
+  font-size: 1.15rem;
+  color: var(--accent);
+  border-bottom: 1px solid var(--rule);
+  padding-bottom: 0.25rem;
+  margin: 1.35rem 0 0.65rem 0;
+  page-break-after: avoid;
+}
+h3 {
+  font-size: 1.0rem;
+  color: #243447;
+  margin: 1.0rem 0 0.45rem 0;
+  page-break-after: avoid;
+}
+p { margin: 0.45rem 0 0.55rem 0; }
+code {
+  font-family: Consolas, "Courier New", monospace;
+  background: var(--soft);
+  padding: 0.05rem 0.28rem;
+  border-radius: 3px;
+  font-size: 0.9em;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.55rem 0 0.9rem 0;
+  font-size: 0.92rem;
+  page-break-inside: avoid;
+}
+th, td {
+  border: 1px solid var(--rule);
+  padding: 0.35rem 0.45rem;
+  vertical-align: top;
+  text-align: left;
+}
+th {
+  background: var(--soft);
+  color: var(--accent);
+  font-weight: 650;
+}
+tr:nth-child(even) td { background: #fafbfc; }
+.MathJax, mjx-container {
+  page-break-inside: avoid;
+}
+mjx-container[display="true"] {
+  margin: 0.7rem 0 !important;
+  overflow-x: auto;
+}
+hr {
+  border: none;
+  border-top: 1px solid var(--rule);
+  margin: 1.1rem 0;
+}
+strong { font-weight: 650; }
+footer.doc-footer {
+  margin-top: 1.4rem;
+  padding-top: 0.55rem;
+  border-top: 1px solid var(--rule);
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+</style>
+</head>
+<body>
+  <header class="doc-header">
+    <p class="eyebrow">SDS-ATP · Room Allocation ILP</p>
+    <h1>Mathematical Formulation</h1>
+    <p class="subtitle">
+      Full Integer Linear Program for <code>utils/gurobi_solver_grouped.py</code>
+      (<code>allot_rooms</code>): sets, variables, constraints, and lexicographic objectives.
+    </p>
+  </header>
+  <h2>1. Sets and indices</h2>
+<table>
+<thead>
+<tr>
+<th>Symbol</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><span class="math-inline">\(E = \{1,\ldots,n_e\}\)</span></td>
+<td>Student exam-rows (one row = one student sitting one exam)</td>
+</tr>
+<tr>
+<td><span class="math-inline">\(R = \{1,\ldots,n_r\}\)</span></td>
+<td>Room availability slots (rows with positive testing capacity)</td>
+</tr>
+<tr>
+<td><span class="math-inline">\(C\)</span></td>
+<td>Distinct course IDs appearing in <span class="math-inline">\(E\)</span></td>
+</tr>
+<tr>
+<td><span class="math-inline">\(G\)</span></td>
+<td>Exam <strong>cohorts</strong>: students with the same <span class="math-inline">\((\mathrm{Course\_ID},\mathrm{Date},\mathrm{Time\_Start},\mathrm{Time\_End})\)</span></td>
+</tr>
+<tr>
+<td><span class="math-inline">\(E_g \subseteq E\)</span></td>
+<td>Student rows belonging to cohort <span class="math-inline">\(g \in G\)</span></td>
+</tr>
+<tr>
+<td><span class="math-inline">\(C_c \subseteq E\)</span></td>
+<td>Student rows with course <span class="math-inline">\(c \in C\)</span></td>
+</tr>
+<tr>
+<td><span class="math-inline">\(E^{\mathrm{RD}} \subseteq E\)</span></td>
+<td>Rows tagged <code>RD</code></td>
+</tr>
+<tr>
+<td><span class="math-inline">\(E^{\mathrm{PRIV}} \subseteq E\)</span></td>
+<td>Rows tagged <code>PRIV</code> or <code>CODS</code></td>
+</tr>
+</tbody>
+</table>
+<h3>Compatibility and time structure</h3>
+<table>
+<thead>
+<tr>
+<th>Symbol</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><span class="math-inline">\(\mathcal{A} \subseteq E \times R\)</span></td>
+<td>Compatible pairs <span class="math-inline">\((i,j)\)</span>: same date, exam fits in room window, and room opens <span class="math-inline">\(\ge 15\)</span> min before exam start</td>
+</tr>
+<tr>
+<td><span class="math-inline">\(R_i = \{j : (i,j)\in\mathcal{A}\}\)</span></td>
+<td>Rooms compatible with exam <span class="math-inline">\(i\)</span></td>
+</tr>
+<tr>
+<td><span class="math-inline">\(E_j = \{i : (i,j)\in\mathcal{A}\}\)</span></td>
+<td>Exams compatible with room <span class="math-inline">\(j\)</span></td>
+</tr>
+<tr>
+<td><span class="math-inline">\(R_g = \bigcup_{i\in E_g} R_i\)</span></td>
+<td>Rooms compatible with at least one member of cohort <span class="math-inline">\(g\)</span></td>
+</tr>
+<tr>
+<td><span class="math-inline">\(T_j\)</span></td>
+<td>Distinct exam start times (minutes) among exams in <span class="math-inline">\(E_j\)</span></td>
+</tr>
+<tr>
+<td><span class="math-inline">\(E_{j,t} \subseteq E_j\)</span></td>
+<td>Concurrent group: exams in slot <span class="math-inline">\(j\)</span> with start time <span class="math-inline">\(t\)</span></td>
+</tr>
+<tr>
+<td><span class="math-inline">\(\mathcal{B}_{30} \subseteq \mathcal{A}\)</span></td>
+<td>Pairs with <span class="math-inline">\(\ge 30\)</span> min pre-exam open buffer</td>
+</tr>
+<tr>
+<td><span class="math-inline">\(\mathcal{B}^{\mathrm{post}}_{15} \subseteq \mathcal{A}\)</span></td>
+<td>Pairs with <span class="math-inline">\(\ge 15\)</span> min post-exam buffer before room close</td>
+</tr>
+<tr>
+<td><span class="math-inline">\(\mathcal{A}_{15} = \mathcal{A}\setminus\mathcal{B}_{30}\)</span></td>
+<td>Compatible pairs with only a 15–29 min pre-buffer</td>
+</tr>
+<tr>
+<td><span class="math-inline">\(\mathcal{A}^{\mathrm{post}}_0 = \mathcal{A}\setminus\mathcal{B}^{\mathrm{post}}_{15}\)</span></td>
+<td>Compatible pairs lacking a 15 min post-buffer</td>
+</tr>
+<tr>
+<td><span class="math-inline">\(R^{Z2} \subseteq R\)</span></td>
+<td>Room slots with Zone <span class="math-inline">\(\neq 1\)</span></td>
+</tr>
+<tr>
+<td><span class="math-inline">\(\mathcal{F}_{15} \subseteq E\times E\times R\)</span></td>
+<td>Non-concurrent pairs in slot <span class="math-inline">\(j\)</span> with inter-exam gap <span class="math-inline">\(< 15\)</span> min (hard conflict)</td>
+</tr>
+<tr>
+<td><span class="math-inline">\(\mathcal{F}_{15\text{–}29} \subseteq E\times E\times R\)</span></td>
+<td>Non-concurrent pairs in slot <span class="math-inline">\(j\)</span> with gap in <span class="math-inline">\([15,30)\)</span> min (soft penalty)</td>
+</tr>
+</tbody>
+</table>
+<p>For non-concurrent <span class="math-inline">\(i_1,i_2\)</span> in the same slot <span class="math-inline">\(j\)</span>, the gap is
+<div class="math-display">\[
+\mathrm{gap}(i_1,i_2)
+=
+\max\bigl(t^{\mathrm{start}}_{i_2}-t^{\mathrm{end}}_{i_1},\;
+t^{\mathrm{start}}_{i_1}-t^{\mathrm{end}}_{i_2}\bigr).
+\]</div>
+Same start time <span class="math-inline">\(\Rightarrow\)</span> concurrent (no gap rule).</p>
+<h3>Room and exam parameters</h3>
+<table>
+<thead>
+<tr>
+<th>Symbol</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><span class="math-inline">\(\mathrm{cap}_j \in \mathbb{Z}_{>0}\)</span></td>
+<td>Testing capacity of room slot <span class="math-inline">\(j\)</span></td>
+</tr>
+<tr>
+<td><span class="math-inline">\(t^{\mathrm{start}}_i,\; t^{\mathrm{end}}_i\)</span></td>
+<td>Exam start/end (minutes since midnight)</td>
+</tr>
+<tr>
+<td><span class="math-inline">\(r^{\mathrm{open}}_j,\; r^{\mathrm{close}}_j\)</span></td>
+<td>Room slot open/close (minutes)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Compatibility (C6, enforced by restricting <span class="math-inline">\(\mathcal{A}\)</span>):</strong>
+<div class="math-display">\[
+(i,j)\in\mathcal{A}
+\iff
+\mathrm{date}_i=\mathrm{date}_j
+\;\wedge\;
+t^{\mathrm{start}}_i - 15 \ge r^{\mathrm{open}}_j
+\;\wedge\;
+t^{\mathrm{end}}_i \le r^{\mathrm{close}}_j.
+\]</div></p>
+<hr>
+<h2>2. Decision variables</h2>
+<p>All variables are binary.</p>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Domain</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><span class="math-inline">\(x_{ij}\)</span></td>
+<td><span class="math-inline">\((i,j)\in\mathcal{A}\)</span></td>
+<td><span class="math-inline">\(1\)</span> if exam-row <span class="math-inline">\(i\)</span> is assigned to room slot <span class="math-inline">\(j\)</span></td>
+</tr>
+<tr>
+<td><span class="math-inline">\(y_j\)</span></td>
+<td><span class="math-inline">\(j\in R\)</span></td>
+<td><span class="math-inline">\(1\)</span> if room slot <span class="math-inline">\(j\)</span> is used by any assigned exam</td>
+</tr>
+<tr>
+<td><span class="math-inline">\(u_{gj}\)</span></td>
+<td><span class="math-inline">\(g\in G,\; j\in R_g\)</span></td>
+<td><span class="math-inline">\(1\)</span> if cohort <span class="math-inline">\(g\)</span> places <strong>at least one</strong> student in room <span class="math-inline">\(j\)</span></td>
+</tr>
+<tr>
+<td><span class="math-inline">\(z_{cjt}\)</span></td>
+<td><span class="math-inline">\(c\in C,\; j\in R,\; t\in T_j\)</span> (when course <span class="math-inline">\(c\)</span> appears among candidates in <span class="math-inline">\(E_{j,t}\)</span>)</td>
+<td><span class="math-inline">\(1\)</span> if course <span class="math-inline">\(c\)</span> has <span class="math-inline">\(\ge 1\)</span> assigned student in concurrent group <span class="math-inline">\((j,t)\)</span></td>
+</tr>
+<tr>
+<td><span class="math-inline">\(\rho_{jt}\)</span></td>
+<td><span class="math-inline">\(j\in R,\; t\in T_j\)</span></td>
+<td><span class="math-inline">\(1\)</span> if concurrent group <span class="math-inline">\((j,t)\)</span> contains an assigned RD student</td>
+</tr>
+<tr>
+<td><span class="math-inline">\(q_{i_1 i_2 j}\)</span></td>
+<td><span class="math-inline">\((i_1,i_2,j)\in\mathcal{F}_{15\text{–}29}\)</span></td>
+<td><span class="math-inline">\(1\)</span> if both <span class="math-inline">\(i_1\)</span> and <span class="math-inline">\(i_2\)</span> are assigned to <span class="math-inline">\(j\)</span> with only a 15–29 min gap</td>
+</tr>
+</tbody>
+</table>
+<div class="math-display">\[
+x_{ij},\; y_j,\; u_{gj},\; z_{cjt},\; \rho_{jt},\; q_{i_1 i_2 j}
+\;\in\;
+\{0,1\}.
+\]</div>
+<hr>
+<h2>3. Constraints</h2>
+<h3>C1 — At most one room per exam</h3>
+<div class="math-display">\[
+\sum_{j \in R_i} x_{ij} \;\le\; 1
+\qquad \forall\, i\in E \text{ with } R_i\neq\emptyset.
+\]</div>
+<h3>Link <span class="math-inline">\(y\)</span> — Room usage</h3>
+<div class="math-display">\[
+x_{ij} \;\le\; y_j
+\qquad \forall\, (i,j)\in\mathcal{A}.
+\]</div>
+<h3>Link <span class="math-inline">\(u\)</span> — Cohort–room indicator</h3>
+<p>For each <span class="math-inline">\(g\in G\)</span>, <span class="math-inline">\(j\in R_g\)</span>, let <span class="math-inline">\(E_g(j)=\{i\in E_g:(i,j)\in\mathcal{A}\}\)</span>.</p>
+<div class="math-display">\[
+\begin{aligned}
+u_{gj} &\ge x_{ij}
+&& \forall\, i\in E_g(j), \\[4pt]
+u_{gj} &\le \sum_{i\in E_g(j)} x_{ij}
+&& \text{(if } E_g(j)\neq\emptyset\text{)}.
+\end{aligned}
+\]</div>
+<p>So <span class="math-inline">\(u_{gj}=1\)</span> iff at least one member of cohort <span class="math-inline">\(g\)</span> is assigned to <span class="math-inline">\(j\)</span>.</p>
+<h3>C2 — Capacity per concurrent group</h3>
+<div class="math-display">\[
+\sum_{i \in E_{j,t}} x_{ij} \;\le\; \mathrm{cap}_j
+\qquad \forall\, j\in R,\; t\in T_j.
+\]</div>
+<h3>C3 — At most three courses per concurrent group</h3>
+<p>Linking for course indicators (standard big-<span class="math-inline">\(M\)</span> / indicator bounds):</p>
+<div class="math-display">\[
+\begin{aligned}
+z_{cjt} &\ge x_{ij}
+&& \forall\, i\in E_{j,t}\cap C_c, \\[4pt]
+z_{cjt} &\le \sum_{i\in E_{j,t}\cap C_c} x_{ij}
+&& \text{(when } E_{j,t}\cap C_c\neq\emptyset\text{)}, \\[6pt]
+\sum_{\substack{c\in C\\ z_{cjt}\text{ defined}}} z_{cjt} &\le 3
+&& \forall\, j\in R,\; t\in T_j.
+\end{aligned}
+\]</div>
+<h3>C4 — RD tag <span class="math-inline">\(\Rightarrow\)</span> concurrent group capped at 20</h3>
+<p>If <span class="math-inline">\(\mathrm{cap}_j > 20\)</span> and <span class="math-inline">\(E_{j,t}\neq\emptyset\)</span>:</p>
+<div class="math-display">\[
+\begin{aligned}
+\rho_{jt} &\ge x_{ij}
+&& \forall\, i\in E_{j,t}\cap E^{\mathrm{RD}}, \\[6pt]
+\sum_{i\in E_{j,t}} x_{ij}
+&\le
+\mathrm{cap}_j - (\mathrm{cap}_j - 20)\,\rho_{jt}.
+\end{aligned}
+\]</div>
+<p>When <span class="math-inline">\(\rho_{jt}=0\)</span>, the right-hand side is <span class="math-inline">\(\mathrm{cap}_j\)</span>; when <span class="math-inline">\(\rho_{jt}=1\)</span>, it becomes <span class="math-inline">\(20\)</span>.</p>
+<h3>C5 — PRIV / CODS alone in concurrent group</h3>
+<p>For each <span class="math-inline">\(i\in E^{\mathrm{PRIV}}\)</span>, let <span class="math-inline">\(t_i=t^{\mathrm{start}}_i\)</span> and
+<span class="math-inline">\(E_{j,t_i}^{(-i)}=E_{j,t_i}\setminus\{i\}\)</span>.</p>
+<div class="math-display">\[
+\sum_{k\in E_{j,t_i}^{(-i)}} x_{kj}
+\;\le\;
+\mathrm{cap}_j\,(1 - x_{ij})
+\qquad \forall\, j\in R_i \text{ with } E_{j,t_i}^{(-i)}\neq\emptyset.
+\]</div>
+<p>If <span class="math-inline">\(x_{ij}=1\)</span>, no other exam may share concurrent group <span class="math-inline">\((j,t_i)\)</span>.</p>
+<h3>C7 — Inter-exam spacing (hard)</h3>
+<div class="math-display">\[
+x_{i_1 j} + x_{i_2 j} \;\le\; 1
+\qquad \forall\, (i_1,i_2,j)\in\mathcal{F}_{15}.
+\]</div>
+<h3>Soft-gap linking for <span class="math-inline">\(q\)</span> (used in P2)</h3>
+<div class="math-display">\[
+q_{i_1 i_2 j}
+\;\ge\;
+x_{i_1 j} + x_{i_2 j} - 1
+\qquad \forall\, (i_1,i_2,j)\in\mathcal{F}_{15\text{–}29}.
+\]</div>
+<p>(Minimizing <span class="math-inline">\(\sum q\)</span> in P2 forces <span class="math-inline">\(q=1\)</span> only when both exams are assigned with a tight 15–29 min gap.)</p>
+<hr>
+<h2>4. Multi-objective (lexicographic)</h2>
+<p>Gurobi <code>setObjectiveN</code> with <strong>minimize</strong> sense. Higher priority is optimized first; later priorities are optimized without worsening earlier ones.</p>
+<div class="math-display">\[
+\begin{aligned}
+\textbf{(P5)}\quad
+&\min\;
+-\sum_{(i,j)\in\mathcal{A}} x_{ij}
+&&\text{(maximize assignments)} \\[8pt]
+\textbf{(P4)}\quad
+&\min\;
+\sum_{g\in G}\;\sum_{j\in R_g} u_{gj}
+&&\text{(minimize rooms per cohort / avoid splits)} \\[8pt]
+\textbf{(P3)}\quad
+&\min\;
+\sum_{j\in R} y_j
+&&\text{(minimize total room slots used)} \\[8pt]
+\textbf{(P2)}\quad
+&\min\;
+\sum_{(i,j)\in\mathcal{A}_{15}} x_{ij}
+\;+\;
+\sum_{(i_1,i_2,j)\in\mathcal{F}_{15\text{–}29}} q_{i_1 i_2 j}
+&&\text{(prefer 30 min pre-/inter-exam buffers)} \\[8pt]
+\textbf{(P1)}\quad
+&\min\;
+\sum_{(i,j)\in\mathcal{A}^{\mathrm{post}}_0} x_{ij}
+&&\text{(prefer 15 min post-exam buffer)} \\[8pt]
+\textbf{(P0)}\quad
+&\min\;
+\sum_{\substack{(i,j)\in\mathcal{A}\\ j\in R^{Z2}}} x_{ij}
+&&\text{(prefer Zone 1 over Zone 2)}.
+\end{aligned}
+\]</div>
+<p>Priority order in code: P5 <span class="math-inline">\(>\)</span> P4 <span class="math-inline">\(>\)</span> P3 <span class="math-inline">\(>\)</span> P2 <span class="math-inline">\(>\)</span> P1 <span class="math-inline">\(>\)</span> P0
+(priorities <span class="math-inline">\(5,4,3,2,1,0\)</span>).</p>
+<hr>
+<h2>5. Compact statement of the model</h2>
+<div class="math-display">\[
+\begin{aligned}
+\text{lex-min}\quad
+&\Bigl(
+-\textstyle\sum_{(i,j)\in\mathcal{A}} x_{ij},\;
+\sum_{g,j} u_{gj},\;
+\sum_j y_j,\;
+\sum_{(i,j)\in\mathcal{A}_{15}} x_{ij}
++\sum_{(i_1,i_2,j)\in\mathcal{F}_{15\text{–}29}} q_{i_1 i_2 j},\;
+\sum_{(i,j)\in\mathcal{A}^{\mathrm{post}}_0} x_{ij},\;
+\sum_{(i,j)\in\mathcal{A}:\,j\in R^{Z2}} x_{ij}
+\Bigr) \\[10pt]
+\text{s.t.}\quad
+&\sum_{j\in R_i} x_{ij} \le 1
+&& \forall\, i \\[4pt]
+&x_{ij} \le y_j
+&& \forall\, (i,j)\in\mathcal{A} \\[4pt]
+&u_{gj} \ge x_{ij},\quad
+u_{gj} \le \sum_{i\in E_g(j)} x_{ij}
+&& \forall\, g,\,j\in R_g \\[4pt]
+&\sum_{i\in E_{j,t}} x_{ij} \le \mathrm{cap}_j
+&& \forall\, j,\,t \\[4pt]
+&z_{cjt} \ge x_{ij}\ (i\in E_{j,t}\cap C_c),\quad
+z_{cjt} \le \sum_{i\in E_{j,t}\cap C_c} x_{ij},\quad
+\sum_c z_{cjt} \le 3
+&& \forall\, j,\,t \\[4pt]
+&\rho_{jt} \ge x_{ij}\ (i\in E_{j,t}\cap E^{\mathrm{RD}}), \\
+&\sum_{i\in E_{j,t}} x_{ij}
+  \le \mathrm{cap}_j - (\mathrm{cap}_j-20)\rho_{jt}
+&& \forall\, j,\,t \text{ with } \mathrm{cap}_j>20 \\[4pt]
+&\sum_{k\in E_{j,t_i}^{(-i)}} x_{kj}
+  \le \mathrm{cap}_j(1-x_{ij})
+&& \forall\, i\in E^{\mathrm{PRIV}},\, j\in R_i \\[4pt]
+&x_{i_1 j}+x_{i_2 j} \le 1
+&& \forall\, (i_1,i_2,j)\in\mathcal{F}_{15} \\[4pt]
+&q_{i_1 i_2 j} \ge x_{i_1 j}+x_{i_2 j}-1
+&& \forall\, (i_1,i_2,j)\in\mathcal{F}_{15\text{–}29} \\[4pt]
+&x,y,u,z,\rho,q \in \{0,1\}.
+\end{aligned}
+\]</div>
+<hr>
+<h2>6. Post-solve booking windows (not part of the ILP)</h2>
+<p>Exam row times <span class="math-inline">\(t^{\mathrm{start}}_i\)</span>, <span class="math-inline">\(t^{\mathrm{end}}_i\)</span> are <strong>not</strong> modified.
+For each assigned pair with <span class="math-inline">\(x_{ij}^\star=1\)</span>, a booking window is recorded:</p>
+<div class="math-display">\[
+\begin{aligned}
+\mathrm{pre}_{ij}
+&=
+\begin{cases}
+30 & \text{if }(i,j)\in\mathcal{B}_{30}, \\
+15 & \text{otherwise},
+\end{cases}
+\qquad
+\mathrm{post}_{ij}
+=
+\begin{cases}
+15 & \text{if }(i,j)\in\mathcal{B}^{\mathrm{post}}_{15}, \\
+0 & \text{otherwise},
+\end{cases} \\[8pt]
+\mathrm{BookStart}_{ij}
+&= t^{\mathrm{start}}_i - \mathrm{pre}_{ij},
+\qquad
+\mathrm{BookEnd}_{ij}
+= t^{\mathrm{end}}_i + \mathrm{post}_{ij}.
+\end{aligned}
+\]</div>
+<p>The returned <code>bookings</code> table is the set of distinct
+<span class="math-inline">\((\mathrm{Date},\,\mathrm{Room},\,\mathrm{BookStart},\,\mathrm{BookEnd})\)</span>
+tuples.</p>
+<hr>
+<h2>7. Variable / constraint map to code</h2>
+<table>
+<thead>
+<tr>
+<th>Math</th>
+<th>Code (<code>gurobi_solver_grouped.py</code>)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><span class="math-inline">\(x_{ij}\)</span></td>
+<td><code>x[(i, j)]</code></td>
+</tr>
+<tr>
+<td><span class="math-inline">\(y_j\)</span></td>
+<td><code>y[j]</code></td>
+</tr>
+<tr>
+<td><span class="math-inline">\(u_{gj}\)</span></td>
+<td><code>u[(g, j)]</code></td>
+</tr>
+<tr>
+<td><span class="math-inline">\(z_{cjt}\)</span></td>
+<td><code>z_g[(c, j, ts)]</code></td>
+</tr>
+<tr>
+<td><span class="math-inline">\(\rho_{jt}\)</span></td>
+<td><code>rd_flag_g[(j, ts)]</code></td>
+</tr>
+<tr>
+<td><span class="math-inline">\(q_{i_1 i_2 j}\)</span></td>
+<td><code>q[(i1, i2, j)]</code></td>
+</tr>
+<tr>
+<td><span class="math-inline">\(\mathcal{A}\)</span></td>
+<td><code>compat</code></td>
+</tr>
+<tr>
+<td><span class="math-inline">\(\mathcal{B}_{30}\)</span></td>
+<td><code>has_30_buffer</code></td>
+</tr>
+<tr>
+<td><span class="math-inline">\(\mathcal{B}^{\mathrm{post}}_{15}\)</span></td>
+<td><code>has_15_post_buffer</code></td>
+</tr>
+<tr>
+<td><span class="math-inline">\(\mathcal{F}_{15}\)</span></td>
+<td><code>inter_15_blocked</code></td>
+</tr>
+<tr>
+<td><span class="math-inline">\(\mathcal{F}_{15\text{–}29}\)</span></td>
+<td><code>inter_only_15</code></td>
+</tr>
+<tr>
+<td><span class="math-inline">\(E_{j,t}\)</span></td>
+<td><code>groups[j][ts]</code></td>
+</tr>
+<tr>
+<td><span class="math-inline">\(G\)</span>, <span class="math-inline">\(E_g\)</span></td>
+<td><code>group_keys</code>, <code>exam_groups</code></td>
+</tr>
+</tbody>
+</table>
+  <footer class="doc-footer">
+    SDS Alternative Testing Program (ATP) · Cohort-aware Gurobi room allocation model
+  </footer>
+</body>
+</html>
